@@ -87,6 +87,8 @@
   ],
   "build_tools": {
     "cmake": "3.31.6",
+    "cmake_linux_x86_64_sha256": "5a1133ff103c71eb5120e2cc3de922733e7d8a26a98ae716397e8676adb367bf",
+    "tauri_cli": "2.12.2",
     "ninja": "1.12.1"
   },
   "test_models": [

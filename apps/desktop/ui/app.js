@@ -414,7 +414,8 @@
     showTemp(st.temperature);
     const choices = st.context_choices || [];
     if (ctx.options.length !== choices.length || [...ctx.options].some((o, i) => Number(o.value) !== choices[i])) {
-      ctx.replaceChildren(...choices.map((c) => h("option", { value: String(c), text: fmt.tokens(c) + (c === st.default_context ? " (default)" : "") })));
+      // The unit is in the label ("Context size, tokens"), so "2,048 (default)" fits a narrow sidebar.
+      ctx.replaceChildren(...choices.map((c) => h("option", { value: String(c), text: fmt.num(c) + (c === st.default_context ? " (default)" : "") })));
     }
     ctx.value = String(st.context_size);
     $("ctxReset").hidden = st.context_size === st.default_context;
@@ -741,7 +742,7 @@
       });
       if (!go) return;
     }
-    $("modelsDlg").close();
+    if ($("modelsDlg").open) $("modelsDlg").close();
     run("select_model", { file: m.file });
   }
 
@@ -1150,7 +1151,88 @@
   }
   $("openModels").addEventListener("click", () => openModels("local"));
   $("dlChip").addEventListener("click", () => openModels("hub"));
-  $("modelCard").addEventListener("click", () => openModels(S.models.length ? "local" : "hub"));
+  // ---------- Model dropdown (sidebar) ------------------------------------
+  // One click on the card lists every model; one more switches. The full Models
+  // screen (import, delete, Hugging Face) is one item away at the bottom.
+
+  const menu = $("modelMenu");
+  const optionsEl = $("modelOptions");
+
+  function renderMenu() {
+    const cur = currentModel();
+    optionsEl.replaceChildren(
+      ...S.models.map((m) => {
+        const selected = !!cur && cur.file === m.file;
+        const li = h(
+          "li",
+          {
+            class: "model-option" + (selected ? " current" : ""),
+            role: "option",
+            id: "opt-" + m.file,
+            "aria-selected": String(selected),
+            "aria-disabled": m.broken ? "true" : null,
+            "data-file": m.file,
+          },
+          h("span", { class: "mo-top" }, h("span", { class: "mo-name", text: m.name }), selected && h("span", { class: "mo-check", text: "In use" })),
+          h("span", { class: "mo-meta" }, h("span", { text: [m.quant, fmt.size(m.size)].filter(Boolean).join(" · ") }), m.broken ? h("span", { class: "fit fit-red", text: "Damaged file" }) : fitEl(m.fit))
+        );
+        li.addEventListener("click", () => pick(m));
+        return li;
+      })
+    );
+  }
+
+  function openMenu() {
+    if (!S.models.length) return openModels("hub");
+    renderMenu();
+    menu.hidden = false;
+    $("modelCard").setAttribute("aria-expanded", "true");
+    const cur = currentModel();
+    setActive(cur ? S.models.findIndex((m) => m.file === cur.file) : 0);
+    optionsEl.focus();
+  }
+  function closeMenu(focusCard = true) {
+    if (menu.hidden) return;
+    menu.hidden = true;
+    $("modelCard").setAttribute("aria-expanded", "false");
+    if (focusCard) $("modelCard").focus();
+  }
+  let active = 0;
+  function setActive(i) {
+    const items = [...optionsEl.children];
+    if (!items.length) return;
+    active = Math.max(0, Math.min(items.length - 1, i));
+    items.forEach((el, k) => el.classList.toggle("active", k === active));
+    optionsEl.setAttribute("aria-activedescendant", items[active].id);
+    items[active].scrollIntoView({ block: "nearest" });
+  }
+  function pick(m) {
+    if (m.broken) return;
+    closeMenu();
+    const cur = currentModel();
+    if (cur && cur.file === m.file && S.engine.state === "ready") return;
+    useModel(m);
+  }
+  $("modelCard").addEventListener("click", () => (menu.hidden ? openMenu() : closeMenu()));
+  optionsEl.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") (setActive(active + 1), e.preventDefault());
+    else if (e.key === "ArrowUp") (setActive(active - 1), e.preventDefault());
+    else if (e.key === "Home") (setActive(0), e.preventDefault());
+    else if (e.key === "End") (setActive(S.models.length - 1), e.preventDefault());
+    else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      if (S.models[active]) pick(S.models[active]);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeMenu();
+    } else if (e.key === "Tab") closeMenu(false);
+  });
+  $("menuManage").addEventListener("click", () => (closeMenu(false), openModels("local")));
+  $("menuDownload").addEventListener("click", () => (closeMenu(false), openModels("hub")));
+  document.addEventListener("mousedown", (e) => {
+    if (!menu.hidden && !e.target.closest(".model-pick")) closeMenu(false);
+  });
 
   // ---------- About -------------------------------------------------------
 
@@ -1306,6 +1388,7 @@
     },
     models(ev) {
       S.models = ev.models;
+      if (!menu.hidden) renderMenu();
       renderLocal();
       renderStatus();
       renderEmpty();

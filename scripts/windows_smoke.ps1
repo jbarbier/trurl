@@ -47,7 +47,8 @@ if (Get-ChildItem $data -Filter *.part) { throw "a .part file was left behind" }
 foreach ($v in "avx2", "avx", "compat") {
   if (-not (Test-Path (Join-Path $env:LOCALAPPDATA "Trurl\llama\$v\llama-server.exe"))) { throw "llama-server $v missing from install" }
 }
-Write-Host "installed, models copied"
+$installed = (Get-ChildItem (Join-Path $env:LOCALAPPDATA "Trurl") -Recurse -File | Measure-Object -Sum Length).Sum
+Write-Host ("installed, models copied. Trurl on disk: {0:N1} MB" -f ($installed / 1MB))
 
 Step "Block all outbound traffic of trurl.exe and llama-server.exe"
 Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True

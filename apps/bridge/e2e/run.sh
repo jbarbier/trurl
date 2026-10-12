@@ -8,6 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.."
 
 MODELS="${TRURL_TEST_MODELS:-$HOME/.cache/trurl/models}"
+python3 scripts/fetch_models.py --dest "$MODELS" --only gemma-3-1b-it,qwen3-0.6b
 cargo build -p trurl-bridge
 (cd apps/bridge/e2e && npm ci --no-audit --no-fund >/dev/null && npx playwright install chromium >/dev/null)
 mkdir -p target

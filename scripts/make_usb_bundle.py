@@ -24,6 +24,7 @@ import json
 import shutil
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -43,8 +44,18 @@ def sha256(p: Path) -> str:
 def download(url: str, dest: Path) -> None:
     print(f"downloading {url}")
     tmp = dest.with_suffix(dest.suffix + ".part")
-    with urllib.request.urlopen(url, timeout=120) as r, open(tmp, "wb") as f:
-        shutil.copyfileobj(r, f)
+    try:
+        with urllib.request.urlopen(url, timeout=120) as r, open(tmp, "wb") as f:
+            shutil.copyfileobj(r, f)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            sys.exit(
+                f"Not found: {url}\n"
+                "That version is not published on GitHub Releases yet. Publish the release, "
+                "or pass --installer with an installer you already have (CI builds one: "
+                "Actions > CI > windows-installer-and-screenshots)."
+            )
+        raise
     tmp.replace(dest)
 
 

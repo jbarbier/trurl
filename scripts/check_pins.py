@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -93,9 +94,12 @@ def main() -> int:
         if e not in readme:
             errors.append(f"README.md pinned-versions table is missing or out of date: {e!r}")
 
-    r = subprocess.run([sys.executable, str(ROOT / "scripts/gen_licenses.py"), "--check"], capture_output=True, text=True)
-    if r.returncode != 0:
-        errors.append("generated licenses are stale:\n" + r.stdout.strip())
+    if not shutil.which("cargo"):
+        errors.append("cannot check licenses/THIRD-PARTY.txt: cargo is not on PATH (add ~/.cargo/bin)")
+    else:
+        r = subprocess.run([sys.executable, str(ROOT / "scripts/gen_licenses.py"), "--check"], capture_output=True, text=True)
+        if r.returncode != 0:
+            errors.append("generated licenses are stale or could not be checked:\n" + (r.stdout + r.stderr).strip())
 
     for e in errors:
         print("FAIL", e)

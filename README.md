@@ -11,7 +11,7 @@
   <a href="https://github.com/jbarbier/trurl/actions/workflows/ci.yml"><img src="https://github.com/jbarbier/trurl/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
-![Trurl answering with Qwen3 0.6B: the model's thinking shows above the answer, with how long it took](docs/img/chat-thinking.png)
+![Trurl answering with Qwen3 0.6B: the model's thinking, folded with how long it took, above the answer](docs/img/thought.png)
 
 Trurl is made for classrooms where the laptops are old, the memory is small and the
 internet is slow or missing. A learner installs it from a USB stick, picks a model,
@@ -44,43 +44,57 @@ model gets exactly what the learner sees.
 
 **From a USB stick (no internet).** Open the stick and double-click
 `Trurl_<version>_x64-offline-setup.exe`. The installer copies the models from the
-stick's `models` folder. No administrator password is needed. See
-[docs/USB-BUNDLE.md](docs/USB-BUNDLE.md) to make the stick.
+stick's `models` folder. No administrator password is needed. To make the stick, see
+[docs/USB-BUNDLE.md](docs/USB-BUNDLE.md).
 
 **From the internet.** Download from the
 [latest release](https://github.com/jbarbier/trurl/releases/latest):
 
 | Computer | Download | Then |
 |---|---|---|
-| Windows 10 or 11 (64-bit) | `Trurl_<version>_x64-setup.exe` | Double-click. Download models from inside Trurl, or import them. |
-| Linux (64-bit) | `trurl-<version>-linux-x64.tar.gz` | `tar xzf trurl-*.tar.gz && sh trurl-*/install.sh`, then run `trurl` |
+| Windows 10 or 11 (64-bit) | `Trurl_<version>_x64-setup.exe` (12 MB) | Double-click. Then download models from inside Trurl, or import them. |
+| Linux (64-bit) | `trurl-<version>-linux-x64.tar.gz` | `tar xzf trurl-*.tar.gz && sh trurl-*/install.sh`, then run `trurl`. If it is not found, log out and back in once, or run `~/.local/bin/trurl`. |
+
+Until the first release is published, the Windows installer built for every change
+is in [GitHub Actions](https://github.com/jbarbier/trurl/actions/workflows/ci.yml):
+open the latest run and download `windows-installer-and-screenshots`.
 
 Windows may say "Windows protected your PC" the first time: click **More info**,
-then **Run anyway**. (The installer is not code-signed yet. Updates are signed.)
+then **Run anyway**. The installer is not code-signed yet; updates are signed.
+
+![Trurl on Windows, with the network blocked: it loaded Gemma 3 1B and answers](docs/img/windows.png)
+
+*Trurl on Windows in the automated test, with all network access blocked by the
+firewall.*
 
 ## Using Trurl
 
 ### Chat
 
 Type a message and press **Enter**. **Shift+Enter** makes a new line. The answer
-appears word by word; **Stop** (or **Esc**) cuts it short. **New chat** (Ctrl+N)
-forgets the conversation. Answers are formatted (lists, bold, code), and each one
-says which model wrote it, so you can compare models in one conversation.
+appears word by word, and **Stop** (or **Esc**) cuts it short. **New chat**
+(Ctrl+N) forgets the conversation. Answers are formatted (lists, bold, code), and
+each one says which model wrote it, so you can compare models in one conversation.
+
+While a model is loading, you can already type and press Send: the message goes out
+as soon as the model is ready.
 
 ![Chat](docs/img/chat.png)
 
 ### Watch a model think
 
-Reasoning models (Qwen3, DeepSeek-R1 distills and others, detected automatically)
-think before they answer. Trurl shows the thinking in a grey block above the
-answer, live. When the answer starts, the block folds and says how long the model
-thought. Click it to read the thinking again. Type `/no_think` in a message to ask
-Qwen3 to skip it.
+Reasoning models think before they answer:
 
-The thinking is never sent back to the model with the next message: only answers
-are, which is how these models are meant to be used.
+- **Which models:** Qwen3, DeepSeek-R1 distills and others, detected automatically.
+- **While it thinks:** Trurl shows the thinking in a grey block above the answer, live.
+- **When the answer starts:** the block folds and says how long the model thought.
+  Click it to read the thinking again.
+- **To skip it:** type `/no_think` in a message to ask Qwen3 not to think.
 
-![Thinking](docs/img/thinking.png)
+The thinking is never sent back to the model with the next message, only the
+answers: that is how these models are meant to be used.
+
+![The thinking streams live while the model works](docs/img/thinking.png)
 
 ### Change how the model behaves
 
@@ -88,21 +102,22 @@ On the left:
 
 | Control | What it does | Default |
 |---|---|---|
+| Model | Which model answers. Click it for the list, with each model's size and memory fit. Switching reloads. | Gemma 3 1B |
 | System prompt | Instructions the model reads before every message. Empty means none. | empty |
 | Temperature | 0.0 to 2.0. Low: focused and repeatable (0 gives the same answer every time). High: more varied. | 0.7 |
 | Context size | How many tokens of conversation the model can see: 256 to 8,192. Changing it reloads the model. | 2,048 |
-| Model | Which model answers. Switching reloads. | Gemma 3 1B |
 
 Each control shows **Reset** when it is not at its default. When a conversation no
 longer fits in the context, Trurl says: "The conversation ran out of room. Start a
 new chat or increase the context size."
 
-![Controls](docs/img/controls.png)
+![A system prompt and temperature 0](docs/img/controls.png)
 
 ### Models
 
-Open **Models** to see the models on this computer, with their size and a dot
-that says whether they fit in this computer's memory:
+A model is one file in the GGUF format (`.gguf`). Click the model in the sidebar to
+switch, or open **Models** to see every model on this computer, with its size and a
+dot that says whether it fits in this computer's memory:
 
 | Dot | Meaning |
 |---|---|
@@ -117,28 +132,36 @@ Trurl's models folder. **Delete** frees the space.
 
 ### Download from Hugging Face
 
-When the computer is online, the **Hugging Face** tab searches
-[huggingface.co](https://huggingface.co) for models in GGUF format. Click a result
-to see its details: who made it, its license, how many parameters it has, its
-model card, and every file with its quantization (Q4_K_M, Q8_0…), size and memory
-fit. Click **Download** on a file.
+When the computer is online, the **Hugging Face** tab of the Models screen searches
+[huggingface.co](https://huggingface.co) for models in GGUF format.
 
-Downloads survive bad connections: when the connection drops, Trurl tries again
-by itself and continues where it stopped, even after Trurl is closed and opened
-again. **Pause**, **Resume** and **Cancel** are always there. Every file is checked
-against Hugging Face's SHA-256 before it appears in the model list.
+- **Details.** Click a result to see who made the model, its license, how many
+  parameters it has, its model card, and every file.
+- **Files.** Each file is the same model at a different size (its quantization, like
+  Q4_K_M or Q8_0), with its memory fit. Q4_K_M is marked **Recommended**.
+- **Download.** Click **Download** on a file.
+
+Downloads survive bad connections:
+
+- **Drops.** When the connection drops, Trurl tries again by itself and continues
+  where it stopped.
+- **Closing Trurl.** A download cut by closing Trurl carries on the next time Trurl
+  starts. **Pause**, **Resume** and **Cancel** are always there.
+- **Checked before use.** Every file is checked against Hugging Face's SHA-256
+  fingerprint before it appears in the model list.
 
 Offline, the tab says "Connect to the internet to browse Hugging Face", and
 everything else keeps working.
 
-![Hugging Face](docs/img/huggingface.png)
+![Hugging Face details: files with their size, memory fit and a Recommended tag](docs/img/huggingface.png)
 
 ### Updates
 
-When online, Trurl checks for a new version once at start and once a day. If there
-is one, a small card says "Update available: version X.Y.Z" with what changed, and
-**Update now** or **Later**. It never updates by itself and never interrupts an
-answer. Updates replace the app only: your models stay.
+When online, Trurl checks for a new version once after it starts and then once a
+day. If there is one, a small card says "Update available: version X.Y.Z" with what
+changed, and **Update now** or **Later**. It never updates by itself and never
+interrupts an answer. Updates replace the app only: your models stay. **About**
+shows the version and has **Check for updates**.
 
 ### Keyboard
 
@@ -147,51 +170,66 @@ answer. Updates replace the app only: your models stay.
 | Enter / Shift+Enter | send / new line |
 | Esc | stop the answer |
 | Ctrl+N | new chat |
-| Ctrl+Shift+S | hidden settings (Hugging Face token for gated models) |
+| Ctrl+Shift+S | hidden settings (Hugging Face token, for gated models) |
 
-The Linux terminal version has the same features; press **F1** inside it for its keys.
+### In a terminal (Linux)
+
+The terminal version has the same features: chat, thinking, the three controls,
+models, Hugging Face search and downloads, updates, licenses. Press **F1** inside it
+for its keys, or see [packaging/linux/README.txt](packaging/linux/README.txt).
+
+![The terminal version](docs/img/terminal.png)
 
 ## What it runs on
 
 | | Desktop app | Terminal app |
 |---|---|---|
-| Windows 10, 11 (64-bit) | ✅ | ✅ |
-| Windows 7, 8.1 (64-bit) | ❌ (Microsoft WebView2 ended support) | not built yet, see [the open item](#for-teachers) |
+| Windows 10, 11 (64-bit) | ✅ | not shipped |
+| Windows 7, 8.1 | ❌ Microsoft's WebView2, which draws the window, ended support | not built yet |
 | Linux, glibc 2.31+ (Ubuntu 20.04+, Debian 11+, Mint 20+) | not shipped | ✅ |
 
-- **CPU:** any 64-bit Intel or AMD. Trurl picks the fastest of three model engines
-  at start:
-  - **AVX2**: Haswell, 2013, and newer.
-  - **AVX**: Sandy Bridge and Ivy Bridge, 2011 to 2012, common in second-hand laptops.
-  - **Compatible**: anything older.
+**CPU:** any 64-bit Intel or AMD. Trurl picks the fastest of its three model engines
+when it starts:
 
-  If a computer cannot run the engine Trurl picked, Trurl moves down a level by
-  itself.
-- **Memory:** 4 GB runs Gemma 3 1B and Qwen3 0.6B. 8 GB also runs Gemma 3 4B.
-- **No graphics card needed.**
-- **Disk:** about 60 MB for Trurl, plus the models: 0.5 to 2.5 GB each.
+- **AVX2:** Haswell, 2013, and newer.
+- **AVX:** Sandy Bridge and Ivy Bridge, 2011 to 2012, common in second-hand laptops.
+- **Compatible:** anything older. It contains no AVX instruction at all, which
+  `scripts/check_cpu_isa.py` proves on every build.
+
+If a computer cannot run the engine Trurl picked, Trurl moves down a level by itself.
+
+**Memory:** 4 GB runs Gemma 3 1B and Qwen3 0.6B. 8 GB also runs Gemma 3 4B. No
+graphics card is needed.
+
+**Disk:** about 60 MB for Trurl, plus the models: 0.5 to 2.5 GB each.
 
 ## Benchmarks
 
-Measured on the same machine against the other ways to run the same model. See
-[docs/BENCHMARKS.md](docs/BENCHMARKS.md) for the method and the raw numbers.
+The same model file, on the same computer, in Trurl and in the other free ways to run
+it. Method and raw numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 <!-- benchmarks:start -->
 <!-- benchmarks:end -->
 
 ## For teachers
 
-- **Same behaviour in every class.** Trurl never changes unless you install a new
-  version: the model engine, the models and every library are pinned (below).
-- **Hand it out on USB sticks.** [docs/USB-BUNDLE.md](docs/USB-BUNDLE.md) explains
-  how to make one, with the three models, and how to add your own.
-- **Course exercises:**
-  - Temperature 0 gives the same answer twice (sessions on sampling).
-  - Context size 256 makes the conversation run out of room (session 1.3.2). llama.cpp
-    rounds any context to a multiple of 256, so 256 is the smallest; it behaves like
-    the course's 200.
-  - `/no_think` turns Qwen3's thinking off (sessions 1.3.4, 1.4.3).
-  - Stop works at any moment, including while the model is thinking.
+**Same behaviour in every class.** Trurl never changes unless you install a new
+version: the model engine, the models and every library are pinned (below).
+
+**Hand it out on USB sticks.** [docs/USB-BUNDLE.md](docs/USB-BUNDLE.md) explains how
+to make one, with the three models, and how to add your own.
+
+**The course exercises, in Trurl:**
+
+| Exercise | In Trurl |
+|---|---|
+| Temperature 0 gives the same answer twice | Slide temperature to 0.0. |
+| A pre-trained model that never stops (1.1.2) | Import its `.gguf`; it runs without a chat template; **Stop** ends it. |
+| Watch thinking live, stop it (1.2.3, 1.3.4) | Pick Qwen3 0.6B. On a laptop it often thinks for 1 to 2 minutes; **Stop** or **Esc** at any moment. |
+| `/no_think` (1.3.4, 1.4.3) | Type it in the message; the thinking block stays empty. |
+| Run out of context (1.3.2) | Set **Context size** to 256, the smallest. llama.cpp rounds any context up to a multiple of 256, so the course's 200 behaves exactly like 256. |
+| Paste a whole web page (1.4.3) | Set **Context size** to 4,096 first: 2,048 tokens is about 1,500 words. |
+| Airplane mode | Everything works; only the Hugging Face tab asks for internet. |
 
 ## Pinned versions
 
@@ -203,11 +241,13 @@ table honest.
 |---|---|---|
 | llama.cpp (model engine) | v0.6.0, build b11429, commit d81235049384 | source tarball SHA-256 in `pins.json`; built by `scripts/build_llama.py` |
 | Rust | Rust 1.99.0 | `rust-toolchain.toml` |
-| Desktop shell | tauri 2.12.3 | `Cargo.toml` (`=` versions) and `Cargo.lock` |
+| Desktop shell | tauri 2.12.3, Tauri CLI 2.12.2 | `Cargo.toml` (`=` versions), `Cargo.lock`, the CLI version in every script |
 | Terminal UI | ratatui 0.30.2 | `Cargo.toml` and `Cargo.lock` |
 | Markdown | marked 18.0.14, dompurify 3.4.16 | vendored files, SHA-256 in `pins.json` |
+| Build tools | CMake 3.31.6 | `pins.json`, SHA-256 checked in the release build |
+| WebView2 (Windows) | Microsoft's current version | not pinnable: Windows keeps it up to date |
 
-| Bundled model | File | SHA-256 (start) | Size |
+| Included model | File | SHA-256 (start) | Size |
 |---|---|---|---|
 | Gemma 3 1B Instruct (default) | `gemma-3-1b-it-Q4_K_M.gguf` from `ggml-org/gemma-3-1b-it-GGUF` | `8ccc5cd1f1b36025` | 806 MB |
 | Gemma 3 4B Instruct | `gemma-3-4b-it-Q4_K_M.gguf` from `ggml-org/gemma-3-4b-it-GGUF` | `882e8d2db44dc554` | 2.49 GB |
@@ -226,7 +266,7 @@ Each model is pinned to a Hugging Face commit, a size and a full SHA-256.
 ## How it works
 
 Trurl is a small Rust program around [llama.cpp](https://github.com/ggml-org/llama.cpp)'s
-`llama-server`:
+`llama-server`, which Trurl builds from source as one file with no dependencies:
 
 - **Starting a model.** Trurl starts `llama-server` with the model, listening only
   on this computer (127.0.0.1) and protected by a random key, and stops it when
@@ -234,10 +274,10 @@ Trurl is a small Rust program around [llama.cpp](https://github.com/ggml-org/lla
 - **Low-RAM settings.** One conversation at a time, no prompt cache, threads =
   physical cores, memory-mapped weights.
 - **Chat template and reasoning.** The model's own chat template comes from its
-  file. Reasoning is separated by llama-server, with a fallback for raw
-  `<think>` tags.
-- **Two front ends, one core.** The Windows app (Tauri, plain HTML/CSS/JS) and
-  the terminal app share one core, so they behave the same.
+  file. Reasoning is separated by llama-server, with a fallback for raw `<think>`
+  tags.
+- **Two front ends, one core.** The Windows app (Tauri, plain HTML/CSS/JS) and the
+  terminal app share one core, so they behave the same.
 
 Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

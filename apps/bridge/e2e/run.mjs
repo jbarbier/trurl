@@ -84,11 +84,11 @@ async function openModels(tab = "local") {
 }
 const closeDialogs = () => page.evaluate(() => document.querySelectorAll("dialog[open]").forEach((d) => d.close()));
 
+// Switch models the way a learner does: the dropdown on the sidebar card.
 async function useModel(name) {
-  await openModels("local");
-  const row = page.locator("#modelList li").filter({ hasText: name });
-  if (await row.getByRole("button", { name: `Use ${name}` }).count()) await row.getByRole("button", { name: `Use ${name}` }).click();
-  else await closeDialogs();
+  await closeDialogs();
+  await page.click("#modelCard");
+  await page.locator("#modelOptions .model-option", { hasText: name }).first().click();
   // Wait for the NEW model to be ready, not the old one still showing Ready.
   await page.waitForFunction(
     (n) => document.querySelector("#chatTitle")?.innerText.includes(n) && document.querySelector("#pill")?.innerText.includes("Ready"),

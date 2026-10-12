@@ -61,5 +61,5 @@ echo
 echo "Trurl is installed. Start it with:  trurl"
 case ":$PATH:" in
   *":$BIN:"*) ;;
-  *) echo "(If 'trurl' is not found, open a new terminal, or run $BIN/trurl)" ;;
+  *) echo "(If 'trurl' is not found, log out and back in once, or run $BIN/trurl)" ;;
 esac

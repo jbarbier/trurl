@@ -58,17 +58,24 @@ The core is the contract. Front ends never talk to llama-server or the network d
 ## Gates
 
 ```
-cargo test --workspace                     # unit + integration (fake server, local HTTP)
-python3 scripts/check_pins.py              # pins.json valid, README table matches
+cargo test                                 # unit + integration (local HTTP servers, no models)
+python3 scripts/check_pins.py              # versions agree, vendored hashes, README table, licenses fresh
 python3 scripts/check_copy.py              # UI copy voice rules
 python3 scripts/check_network.py           # no URL outside the allowlist
-cargo test -p trurl-core --test live -- --ignored   # evals: real llama-server + real models
-node apps/bridge/e2e/run.mjs               # UI flows in Chromium at 1366x768
+python3 scripts/check_cpu_isa.py vendor/llama/linux     # each build uses only its CPU tier
+python3 scripts/check_pe_imports.py vendor/llama/linux  # no library a learner may lack
+bash scripts/run_evals.sh                  # evals: real llama-server + real models, network blocked
+bash apps/bridge/e2e/run.sh                # UI flows in Chromium at 1366x768, real core
 ```
 
-Gate tests are the first four: deterministic, offline, fast. The last two are the eval
-lane: they need the pinned llama.cpp build and models (`python3 scripts/fetch_deps.py`),
-take minutes, and run before every release and in CI.
+The first four are gates: deterministic, offline, fast. The ISA and import checks need
+the llama-server builds (`python3 scripts/build_llama.py`, 10 to 30 minutes per tier
+on a laptop). The last two are the eval lane: they fetch the pinned models once
+(`scripts/fetch_models.py`, about 1.3 GB), take minutes, and run in CI on every pull
+request, on Linux and on Windows (`scripts/run_evals.ps1`, `scripts/windows_smoke.ps1`,
+`scripts/windows_update_test.ps1`).
+
+To change the version: `python3 scripts/bump_version.py X.Y.Z` (never by hand).
 
 ## Copy and design
 
@@ -87,7 +94,8 @@ Never bump a version as a side effect. A bump is its own PR: update `pins.json`,
 
 ## Repo hygiene (public repo)
 
-- No binaries except the README images in `docs/img/` (compressed, each under 300 KB).
+- No binaries except the README images in `docs/img/` (compressed, each under 300 KB),
+  the vendored Sora font (pinned in `pins.json`) and the signature test fixture.
   Models, llama.cpp builds, icons and installers are fetched or generated, never committed.
 - No secrets. The updater private key lives in GitHub Actions secrets and in the
   maintainer's password manager, nowhere else.

@@ -23,7 +23,16 @@
       <div class="side-scroll">
         <section class="field" aria-labelledby="modelLabel">
           <h2 class="field-label" id="modelLabel">Model</h2>
-          <button class="model-card" id="modelCard" type="button" aria-describedby="modelLabel"></button>
+          <div class="model-pick">
+            <button class="model-card" id="modelCard" type="button" aria-describedby="modelLabel" aria-haspopup="listbox" aria-expanded="false" aria-controls="modelMenu"></button>
+            <div class="model-menu" id="modelMenu" hidden>
+              <ul class="model-options" id="modelOptions" role="listbox" aria-label="Choose a model" tabindex="-1"></ul>
+              <div class="model-menu-foot">
+                <button class="btn btn-quiet" id="menuManage" type="button">Manage models…</button>
+                <button class="btn btn-quiet" id="menuDownload" type="button">Download more…</button>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section class="field">
@@ -49,7 +58,7 @@
 
         <section class="field">
           <div class="field-row">
-            <label class="field-label" for="ctx">Context size</label>
+            <label class="field-label" for="ctx">Context size, tokens</label>
             <button class="link-btn" id="ctxReset" type="button" hidden>Reset</button>
           </div>
           <div class="select-wrap"><select id="ctx" aria-describedby="ctxNote"></select></div>
