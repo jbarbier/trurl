@@ -1104,7 +1104,16 @@
               svg(ICON.download),
               "Download"
             );
-          return h("tr", null, h("td", null, h("span", { class: "q", text: f.quant || "Unknown" }), h("span", { class: "p", text: f.path })), h("td", { class: "num", text: fmt.size(f.size) }), h("td", null, fitEl(f.fit)), h("td", null, action));
+          // Q4_K_M is the usual balance of size and quality, and what the course uses.
+          const recommended = f.quant === "Q4_K_M" && !f.split;
+          return h(
+            "tr",
+            null,
+            h("td", null, h("span", { class: "q", text: f.quant || "Unknown" }), recommended && h("span", { class: "tag tag-held rec", text: "Recommended" }), h("span", { class: "p", text: f.path })),
+            h("td", { class: "num", text: fmt.size(f.size) }),
+            h("td", null, fitEl(f.fit)),
+            h("td", null, action)
+          );
         })
       );
     });

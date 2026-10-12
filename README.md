@@ -176,7 +176,8 @@ The Linux terminal version has the same features; press **F1** inside it for its
 Measured on the same machine against the other ways to run the same model. See
 [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for the method and the raw numbers.
 
-<!-- benchmarks table: filled by scripts/benchmark.py -->
+<!-- benchmarks:start -->
+<!-- benchmarks:end -->
 
 ## For teachers
 

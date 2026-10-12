@@ -60,6 +60,8 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ninja-build
       - name: Build llama-server (avx2, avx, compat)
         run: test -x vendor/llama/linux/compat/llama-server || python3 scripts/build_llama.py
+      - name: Each llama-server build uses only its CPU tier's instructions
+        run: python3 scripts/check_cpu_isa.py vendor/llama/linux && python3 scripts/check_pe_imports.py vendor/llama/linux
       - name: Evals, offline
         run: bash scripts/run_evals.sh
       - name: UI end-to-end (bridge + Chromium at 1366x768)
@@ -97,6 +99,10 @@ jobs:
         run: if (-not (Test-Path vendor/llama/windows/compat/llama-server.exe)) { python scripts/build_llama.py }
       - name: Check llama-server needs no DLL beyond Windows itself
         run: python scripts/check_pe_imports.py vendor/llama/windows
+      - name: Each llama-server build uses only its CPU tier's instructions
+        env:
+          OBJDUMP: C:\Program Files\LLVM\bin\llvm-objdump.exe
+        run: python scripts/check_cpu_isa.py vendor/llama/windows
       - name: Unit tests
         run: cargo test -p trurl-core
       - name: Evals with outbound network blocked by the firewall
