@@ -238,6 +238,36 @@ if (SUITE === "full") {
   });
 }
 
+if (SUITE === "update") {
+  // The installed version N sees N+1 in the manifest and updates when asked.
+  const expect = arg("expect-version");
+  await step(`update card offers version ${expect}`, async () => {
+    await page.getByText(`Update available: version ${expect}`).waitFor({ timeout: 120000 });
+    await shot(page, "update-offered");
+  });
+  await step("Update now downloads, installs and closes the app", async () => {
+    const gone = new Promise((resolve) => browser.on("disconnected", resolve));
+    await page.getByRole("button", { name: "Update now" }).click();
+    await Promise.race([gone, new Promise((_, rej) => setTimeout(() => rej(new Error("the app did not close to install")), 180000))]);
+  });
+  log(failures ? `${failures} step(s) FAILED` : "all steps passed");
+  process.exit(failures ? 1 : 0);
+}
+
+if (SUITE === "after-update") {
+  const expect = arg("expect-version");
+  await step(`About says version ${expect}`, async () => {
+    await page.click("#openAbout");
+    await page.getByText(`Version ${expect}`).waitFor({ timeout: 10000 });
+    await shot(page, "about-after-update");
+    await closeDialogs();
+  });
+  await step("the model kept through the update still answers", async () => {
+    await ask("/no_think Say OK.");
+    if (!(await lastTurn().locator(".md").innerText()).trim()) throw new Error("no answer after the update");
+  });
+}
+
 if (SUITE === "offline") {
   await step("Hugging Face says to connect, everything else works", async () => {
     await openModels("hub");

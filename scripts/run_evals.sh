@@ -15,6 +15,8 @@ MODELS="${TRURL_TEST_MODELS:-$HOME/.cache/trurl/models}"
 FILTER="${1:-}"
 
 python3 scripts/fetch_models.py --dest "$MODELS" --only gemma-3-1b-it,qwen3-0.6b
+# A 1 MB base model with no chat template (course session 1.1.2), pinned by commit and hash.
+python3 scripts/fetch_models.py --dest "$MODELS" --test-models
 if [ ! -x vendor/llama/linux/compat/llama-server ]; then
   python3 scripts/build_llama.py
 fi

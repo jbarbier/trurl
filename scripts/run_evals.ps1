@@ -11,6 +11,8 @@ $models = $env:TRURL_TEST_MODELS
 if (-not $models) { $models = Join-Path $HOME ".cache\trurl\models" }
 python scripts/fetch_models.py --dest $models --only gemma-3-1b-it,qwen3-0.6b
 if ($LASTEXITCODE -ne 0) { throw "fetch_models failed" }
+python scripts/fetch_models.py --dest $models --test-models
+if ($LASTEXITCODE -ne 0) { throw "fetch_models --test-models failed" }
 
 $bin = cargo test -p trurl-core --test live --no-run --message-format=json 2>$null |
   ForEach-Object { try { $_ | ConvertFrom-Json } catch { $null } } |

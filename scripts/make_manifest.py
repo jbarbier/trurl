@@ -18,15 +18,16 @@ import json
 from pathlib import Path
 
 REPO = "jbarbier/trurl"
+DEFAULT_BASE = f"https://github.com/{REPO}/releases/download/v{{version}}"
 
 
-def entry(path: Path, version: str) -> dict:
+def entry(path: Path, version: str, base: str) -> dict:
     sig = Path(str(path) + ".sig")
     if not sig.exists():
         raise SystemExit(f"missing signature {sig}")
     return {
         "signature": sig.read_text().strip(),
-        "url": f"https://github.com/{REPO}/releases/download/v{version}/{path.name}",
+        "url": f"{base.format(version=version).rstrip('/')}/{path.name}",
     }
 
 
@@ -37,12 +38,13 @@ def main() -> None:
     ap.add_argument("--windows")
     ap.add_argument("--linux")
     ap.add_argument("--out", default="latest.json")
+    ap.add_argument("--base-url", default=DEFAULT_BASE, help="where the files are served (tests use localhost)")
     a = ap.parse_args()
     platforms = {}
     if a.windows:
-        platforms["windows-x86_64"] = entry(Path(a.windows), a.version)
+        platforms["windows-x86_64"] = entry(Path(a.windows), a.version, a.base_url)
     if a.linux:
-        platforms["linux-x86_64"] = entry(Path(a.linux), a.version)
+        platforms["linux-x86_64"] = entry(Path(a.linux), a.version, a.base_url)
     if not platforms:
         raise SystemExit("give --windows and/or --linux")
     manifest = {

@@ -123,14 +123,16 @@ pub fn safe_model_file_name(original: &str) -> Option<String> {
     if out.is_empty() {
         return None;
     }
-    let upper = out.to_ascii_uppercase();
+    // Windows treats "NUL", "CON", "COM1"... as devices even with an extension
+    // ("nul.Q4_K_M.gguf"), so check the part before the first dot.
+    let first = out.split('.').next().unwrap_or("").to_ascii_uppercase();
     let reserved = ["CON", "PRN", "AUX", "NUL"];
-    let is_reserved = reserved.contains(&upper.as_str())
-        || ((upper.starts_with("COM") || upper.starts_with("LPT"))
-            && upper.len() == 4
-            && upper.as_bytes()[3].is_ascii_digit());
+    let is_reserved = reserved.contains(&first.as_str())
+        || ((first.starts_with("COM") || first.starts_with("LPT"))
+            && first.len() == 4
+            && first.as_bytes()[3].is_ascii_digit());
     let out = if is_reserved {
-        format!("{out}_model")
+        format!("model_{out}")
     } else {
         out
     };
@@ -177,12 +179,21 @@ mod tests {
         );
         assert_eq!(
             safe_model_file_name("CON.gguf").as_deref(),
-            Some("CON_model.gguf")
+            Some("model_CON.gguf")
         );
         assert_eq!(
-            safe_model_file_name("com1.gguf").as_deref(),
-            Some("com1_model.gguf")
+            safe_model_file_name("nul.Q4_K_M.gguf").as_deref(),
+            Some("model_nul.Q4_K_M.gguf")
         );
+        assert_eq!(
+            safe_model_file_name("lpt3.gguf").as_deref(),
+            Some("model_lpt3.gguf")
+        );
+        assert_eq!(
+            safe_model_file_name("console.gguf").as_deref(),
+            Some("console.gguf")
+        );
+
         assert_eq!(
             safe_model_file_name("a..b.gguf").as_deref(),
             Some("a.b.gguf")

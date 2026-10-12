@@ -1,17 +1,21 @@
 name: Release
 
-# Push a tag "v<version>" (the version in pins.json) to build and publish:
+# Push a tag "v<version>" (the version in pins.json) to build, test and prepare:
 #   Trurl_<v>_x64-setup.exe          + .sig   what the desktop updater installs
 #   Trurl_<v>_x64-offline-setup.exe            for USB sticks (includes WebView2)
 #   trurl-<v>-linux-x64.tar.gz       + .sig   terminal app, glibc 2.31+
 #   latest.json                                the update manifest
 #   SHA256SUMS.txt
-# See docs/RELEASING.md.
+# The release is created as a DRAFT: learners get nothing until a maintainer
+# reviews it and clicks "Publish release" on GitHub. See docs/RELEASING.md.
+#
+# Supply chain: llama-server is rebuilt from the pinned source (no cache), and
+# the signing key exists only in the one step that signs, in a job that builds
+# no project code.
 
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,47 +26,51 @@ jobs:
     defaults:
       run:
         shell: pwsh
+    env:
+      TRURL_TEST_MODELS: ${{ github.workspace }}/../trurl-models
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Tag matches pins.json
         run: |
           $v = (Get-Content pins.json | ConvertFrom-Json).app.version
-          if ("${{ github.ref_type }}" -eq "tag" -and "${{ github.ref_name }}" -ne "v$v") { throw "tag ${{ github.ref_name }} != v$v" }
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
-        with:
-          path: |
-            ~/.cache/trurl
-            vendor/llama
-          key: llama-release-windows-${{ hashFiles('pins.json', 'scripts/build_llama.py') }}
-      - run: if (-not (Test-Path vendor/llama/windows/compat/llama-server.exe)) { python scripts/build_llama.py }
+          if ("${{ github.ref_name }}" -ne "v$v") { throw "tag ${{ github.ref_name }} != v$v" }
+      - name: Build llama-server from the pinned source (no cache)
+        run: python scripts/build_llama.py
       - run: python scripts/check_pe_imports.py vendor/llama/windows
+      - name: Each build uses only its CPU tier's instructions
+        env:
+          OBJDUMP: C:\Program Files\LLVM\bin\llvm-objdump.exe
+        run: python scripts/check_cpu_isa.py vendor/llama/windows
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
       - run: npx --yes @tauri-apps/cli@2.12.2 icon branding/app-icon.svg -o apps/desktop/src-tauri/icons
-      - name: Update installer (small, signed for the updater)
+      - name: Update installer (small; WebView2 fetched only if missing)
         working-directory: apps/desktop
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           npx --yes @tauri-apps/cli@2.12.2 build
           New-Item -ItemType Directory -Force ../../dist | Out-Null
           Copy-Item ../../target/release/bundle/nsis/*-setup.exe ../../dist/
-          Copy-Item ../../target/release/bundle/nsis/*-setup.exe.sig ../../dist/
-      - name: USB installer (embeds the WebView2 offline installer for Windows 10 PCs without it)
+      - name: USB installer (embeds the WebView2 offline installer)
         working-directory: apps/desktop
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          npx --yes @tauri-apps/cli@2.12.2 build --config '{\"bundle\":{\"windows\":{\"webviewInstallMode\":{\"type\":\"offlineInstaller\",\"silent\":true}}}}'
+          npx --yes @tauri-apps/cli@2.12.2 build --config src-tauri/tauri.usb.conf.json
           $exe = Get-ChildItem ../../target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
           Copy-Item $exe.FullName ("../../dist/" + $exe.Name.Replace("-setup.exe", "-offline-setup.exe"))
+      - name: Models for the smoke test
+        run: python scripts/fetch_models.py --dest $env:TRURL_TEST_MODELS --only gemma-3-1b-it,qwen3-0.6b
+      - name: Smoke-test the USB installer exactly as a teacher uses it
+        run: ./scripts/windows_smoke.ps1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows
           path: dist/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: windows-smoke-screenshots
+          path: target/e2e/
+          if-no-files-found: ignore
 
   linux:
     runs-on: ubuntu-24.04
@@ -74,13 +82,17 @@ jobs:
       - name: Pinned CMake
         run: |
           curl -sSL -o /tmp/cmake.tgz https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-linux-x86_64.tar.gz
+          echo "5a1133ff103c71eb5120e2cc3de922733e7d8a26a98ae716397e8676adb367bf  /tmp/cmake.tgz" | sha256sum -c -
           tar -xzf /tmp/cmake.tgz -C /opt
           echo "/opt/cmake-3.31.6-linux-x86_64/bin" >> "$GITHUB_PATH"
       - name: Pinned Rust
         run: |
           curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Toolchain from rust-toolchain.toml
+        run: rustup toolchain install
       - run: python3 scripts/build_llama.py
+      - run: python3 scripts/check_cpu_isa.py vendor/llama/linux
       - run: bash scripts/package_linux.sh
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -96,21 +108,32 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
+          name: windows
           path: dist
-          merge-multiple: true
-      - name: Sign the Linux tarball with the updater key
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linux
+          path: dist
+      - name: Version
+        run: echo "V=$(python3 -c 'import json;print(json.load(open("pins.json"))["app"]["version"])')" >> "$GITHUB_ENV"
+      - name: Sign the update files (the only step that sees the key)
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx --yes @tauri-apps/cli@2.12.2 signer sign dist/trurl-*-linux-x64.tar.gz
-      - name: Manifest, checksums, release
+        run: |
+          npx --yes @tauri-apps/cli@2.12.2 signer sign --app-version "$V" "dist/Trurl_${V}_x64-setup.exe"
+          npx --yes @tauri-apps/cli@2.12.2 signer sign --app-version "$V" "dist/trurl-${V}-linux-x64.tar.gz"
+      - name: Check every signature the way installed copies of Trurl will
+        run: |
+          cargo run --quiet -p trurl-core --example verify_update -- "dist/Trurl_${V}_x64-setup.exe" "dist/Trurl_${V}_x64-setup.exe.sig" "$V"
+          cargo run --quiet -p trurl-core --example verify_update -- "dist/trurl-${V}-linux-x64.tar.gz" "dist/trurl-${V}-linux-x64.tar.gz.sig" "$V"
+      - name: Manifest, checksums, draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          V=$(python3 -c 'import json;print(json.load(open("pins.json"))["app"]["version"])')
           python3 scripts/release_notes.py "$V" > notes.md
           python3 scripts/make_manifest.py --version "$V" --notes-file notes.md \
             --windows "dist/Trurl_${V}_x64-setup.exe" \
             --linux "dist/trurl-${V}-linux-x64.tar.gz" --out dist/latest.json
           (cd dist && sha256sum *.exe *.tar.gz > SHA256SUMS.txt)
-          gh release create "v$V" --title "Trurl $V" --notes-file notes.md dist/*
+          gh release create "v$V" --draft --title "Trurl $V" --notes-file notes.md dist/*

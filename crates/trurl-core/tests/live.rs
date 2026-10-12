@@ -457,3 +457,72 @@ fn kill_llama_servers() {
             .status();
     }
 }
+
+/// Regression: "New chat" while an answer streams used to leave both apps stuck in
+/// "generating" forever. The answer must end, the apps must hear it, and the next
+/// message must go through.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn new_chat_during_an_answer_frees_the_chat() {
+    let h = harness(&[GEMMA], |_| {});
+    h.ready(GEMMA).await;
+    let id = h.app.send("Write a long story about a lion.").unwrap();
+    h.wait("some answer", 120, |app, _| {
+        app.turns()
+            .into_iter()
+            .find(|t| t.id == id && t.answer.len() > 20)
+    })
+    .await;
+    h.app.new_chat();
+    h.wait("generating false", 30, |app, ev| {
+        let told = ev
+            .iter()
+            .rev()
+            .any(|e| matches!(e, Event::Generating { generating: false }));
+        (told && !app.is_generating()).then_some(())
+    })
+    .await;
+    assert!(h.app.turns().is_empty());
+    let t = h.ask("Say hello.").await;
+    assert_eq!(t.status, TurnStatus::Done);
+    h.app.shutdown().await;
+}
+
+/// Session 1.1.2: a pre-trained (base) model has no chat template. It must
+/// still load and write something, and Stop must work, like in the course.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn a_model_without_a_chat_template_still_runs() {
+    let tiny = models_src().join("stories260K-f32.gguf");
+    if !tiny.exists() {
+        panic!("scripts/run_evals.sh fetches stories260K-f32.gguf; run it first");
+    }
+    let h = harness(&["stories260K-f32.gguf"], |_| {});
+    h.ready("stories260K-f32.gguf").await;
+    assert!(
+        !h.app.models()[0].has_chat_template,
+        "this test needs a file without a template"
+    );
+    let t = h.ask("Once upon a time").await;
+    assert!(
+        matches!(t.status, TurnStatus::Done | TurnStatus::Cut),
+        "{t:?}"
+    );
+    assert!(!t.answer.trim().is_empty(), "the base model wrote nothing");
+    h.app.shutdown().await;
+}
+
+/// Reading a model's header runs at start and after every import or download:
+/// it must stay fast even for big vocabularies (262k tokens for Gemma 3).
+#[test]
+#[ignore]
+fn reading_model_headers_is_fast() {
+    for m in [GEMMA, QWEN] {
+        let p = models_src().join(m);
+        let t0 = Instant::now();
+        let info = trurl_core::gguf::read(&p).expect("parse");
+        let ms = t0.elapsed().as_millis();
+        eprintln!("{m}: {ms} ms, {:?}", info.architecture);
+        assert!(ms < 400, "{m} header took {ms} ms");
+    }
+}

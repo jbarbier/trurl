@@ -113,8 +113,16 @@ pub fn pick(m: &Manifest, current: &str, platform: &str) -> Option<UpdateInfo> {
 }
 
 /// Check `bytes` against a Tauri-style signature (base64 of a minisign signature
-/// file) and public key (base64 of a minisign public key file).
-pub fn verify(bytes: &[u8], signature_b64: &str, pubkey_b64: &str) -> Result<(), String> {
+/// file) and public key (base64 of a minisign public key file). When `version`
+/// is given, the signature must also name that version in its signed comment
+/// (`tauri signer sign --app-version`): a tampered manifest cannot pair a new
+/// version number with an older signed release.
+pub fn verify(
+    bytes: &[u8],
+    signature_b64: &str,
+    pubkey_b64: &str,
+    version: Option<&str>,
+) -> Result<(), String> {
     let b64 = base64::engine::general_purpose::STANDARD;
     let pk_text = String::from_utf8(b64.decode(pubkey_b64.trim()).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
@@ -125,7 +133,18 @@ pub fn verify(bytes: &[u8], signature_b64: &str, pubkey_b64: &str) -> Result<(),
     .map_err(|e| e.to_string())?;
     let pk = minisign_verify::PublicKey::decode(&pk_text).map_err(|e| e.to_string())?;
     let sig = minisign_verify::Signature::decode(&sig_text).map_err(|e| e.to_string())?;
-    pk.verify(bytes, &sig, false).map_err(|e| e.to_string())
+    pk.verify(bytes, &sig, false).map_err(|e| e.to_string())?;
+    if let Some(want) = version {
+        let signed = sig
+            .trusted_comment()
+            .split('\t')
+            .find_map(|f| f.strip_prefix("version:"))
+            .ok_or("the signature does not say which version it is for")?;
+        if signed.trim_start_matches('v') != want.trim_start_matches('v') {
+            return Err(format!("signed for version {signed}, announced as {want}"));
+        }
+    }
+    Ok(())
 }
 
 /// Download the update and verify it. Returns the verified bytes.
@@ -152,7 +171,7 @@ pub async fn download(
         buf.extend_from_slice(&chunk);
         progress(buf.len() as u64, total);
     }
-    verify(&buf, &info.signature, PUBKEY).map_err(|e| {
+    verify(&buf, &info.signature, PUBKEY, Some(&info.version)).map_err(|e| {
         UserError::update_failed().with_detail(format!("signature check failed: {e}"))
     })?;
     Ok(buf)
@@ -212,7 +231,19 @@ mod tests {
 
     #[test]
     fn rejects_bad_signatures() {
-        assert!(verify(b"data", "bm90IGEgc2ln", PUBKEY).is_err());
-        assert!(verify(b"data", "!!!", PUBKEY).is_err());
+        assert!(verify(b"data", "bm90IGEgc2ln", PUBKEY, None).is_err());
+        // A real signature from the release key, made with
+        // `tauri signer sign --app-version 9.9.9 tests/fixtures/update-fixture.txt`.
+        let data = include_bytes!("../tests/fixtures/update-fixture.txt");
+        let sig = include_str!("../tests/fixtures/update-fixture.txt.sig");
+        assert_eq!(verify(data, sig, PUBKEY, Some("9.9.9")), Ok(()));
+        assert_eq!(verify(data, sig, PUBKEY, None), Ok(()));
+        // Same signature, but the manifest claims another version: refused.
+        assert!(verify(data, sig, PUBKEY, Some("10.0.0")).is_err());
+        // One changed byte: refused.
+        let mut bad = data.to_vec();
+        bad[0] ^= 1;
+        assert!(verify(&bad, sig, PUBKEY, Some("9.9.9")).is_err());
+        assert!(verify(b"data", "!!!", PUBKEY, None).is_err());
     }
 }

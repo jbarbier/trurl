@@ -73,7 +73,7 @@ pub enum UpdateState {
     Available(UpdateInfo),
     Downloading(UpdateInfo, u64, Option<u64>),
     Failed(UserError),
-    Hidden(UpdateInfo),
+    Hidden,
 }
 
 pub struct Ui {
@@ -277,18 +277,15 @@ impl Ui {
             EngineState::Loading { name, .. } => (format!("Loading {name}…"), "loading"),
             EngineState::Ready { name, .. } => {
                 if self.generating {
-                    let thinking = self
+                    // Until the first answer word, the model is reading or thinking.
+                    let answering = self
                         .turns
                         .last()
-                        .map(|t| {
-                            t.status == TurnStatus::Streaming
-                                && t.answer.is_empty()
-                                && !t.reasoning.is_empty()
-                        })
+                        .map(|t| t.status == TurnStatus::Streaming && !t.answer.is_empty())
                         .unwrap_or(false);
                     (
                         name.clone(),
-                        if thinking { "thinking" } else { "answering" },
+                        if answering { "answering" } else { "thinking" },
                     )
                 } else {
                     (name.clone(), "ready")

@@ -79,7 +79,8 @@ struct Inner {
     state: Mutex<State>,
     server: tokio::sync::Mutex<Option<Server>>,
     endpoint: Mutex<Option<Endpoint>>,
-    gen_cancel: Mutex<Option<CancellationToken>>,
+    /// The running answer's turn id and its cancel token.
+    gen_cancel: Mutex<Option<(u64, CancellationToken)>>,
     load_cancel: Mutex<Option<CancellationToken>>,
     downloads: Mutex<Option<Downloads>>,
     shutdown: CancellationToken,
@@ -95,6 +96,7 @@ impl App {
     /// Must be called inside a tokio runtime.
     pub fn start(cfg: AppConfig, sink: Sink) -> App {
         let _ = cfg.paths.ensure();
+        crate::server::remove_stale_key_files(&cfg.paths.models());
         let hw = Hardware::detect();
         let settings = Settings::load(&cfg.paths.settings());
         let verified = VerifiedCache::load(&cfg.paths.verified_cache());
@@ -170,6 +172,8 @@ impl App {
             }),
         );
         d.set_token(&self.inner.state.lock().unwrap().settings.hf_token);
+        // Downloads cut by closing Trurl carry on; ones the learner paused stay paused.
+        d.resume_interrupted();
         *self.inner.downloads.lock().unwrap() = Some(d);
     }
 
@@ -311,14 +315,13 @@ impl App {
     // ----- models ------------------------------------------------------------
 
     pub fn rescan(&self) {
-        let models = {
-            let st = self.inner.state.lock().unwrap();
-            models::scan(
-                &self.inner.paths.models(),
-                self.inner.hw.total_ram,
-                &st.verified,
-            )
-        };
+        // Reading headers takes a moment on a slow disk: never hold the state lock for it.
+        let verified = self.inner.state.lock().unwrap().verified.clone();
+        let models = models::scan(
+            &self.inner.paths.models(),
+            self.inner.hw.total_ram,
+            &verified,
+        );
         self.inner.state.lock().unwrap().models = models.clone();
         self.emit(Event::Models { models });
     }
@@ -329,14 +332,7 @@ impl App {
 
     fn pick_initial_model(&self) -> Option<String> {
         let st = self.inner.state.lock().unwrap();
-        let usable = |f: &str| st.models.iter().any(|m| m.file == f && !m.broken);
-        if let Some(f) = st.settings.model.clone().filter(|f| usable(f)) {
-            return Some(f);
-        }
-        if let Some(d) = default_model().filter(|d| usable(&d.file)) {
-            return Some(d.file.clone());
-        }
-        st.models.iter().find(|m| !m.broken).map(|m| m.file.clone())
+        choose_initial_model(&st.models, st.settings.model.as_deref())
     }
 
     /// Hash bundled models once (cached by size and date), so a damaged USB copy is caught.
@@ -506,6 +502,13 @@ impl App {
         }
     }
 
+    /// Stop the model server but keep the app alive (before installing an
+    /// update). If the install fails, `reload()` brings the model back.
+    pub async fn release_engine(&self) {
+        self.stop_generation();
+        self.unload().await;
+    }
+
     async fn unload(&self) {
         if let Some(c) = self.inner.load_cancel.lock().unwrap().take() {
             c.cancel();
@@ -576,6 +579,7 @@ impl App {
             return Err(UserError::server_start());
         }
         if let Some(mut old) = guard.take() {
+            *self.inner.endpoint.lock().unwrap() = None;
             tokio::task::spawn_blocking(move || old.stop()).await.ok();
         }
         if let Some(m) = self
@@ -605,6 +609,13 @@ impl App {
             };
             let mut server = Server::spawn(&cfg, &root)?;
             match server.wait_ready(&self.inner.local_http, cancel).await {
+                Ok(()) if cancel.is_cancelled() => {
+                    // A newer load replaced this one while it finished: do not publish it.
+                    tokio::task::spawn_blocking(move || server.stop())
+                        .await
+                        .ok();
+                    return Err(UserError::server_start());
+                }
                 Ok(()) => {
                     *self.inner.endpoint.lock().unwrap() = Some(Endpoint {
                         base_url: server.base_url(),
@@ -695,7 +706,7 @@ impl App {
     }
 
     pub fn stop_generation(&self) {
-        if let Some(c) = self.inner.gen_cancel.lock().unwrap().take() {
+        if let Some((_, c)) = self.inner.gen_cancel.lock().unwrap().take() {
             c.cancel();
         }
     }
@@ -720,6 +731,11 @@ impl App {
             if st.generating {
                 return Err(UserError::busy());
             }
+            // The endpoint may belong to a model that is being replaced right now.
+            let ready = matches!(&st.engine, EngineState::Ready { file, .. } if *file == ep.file);
+            if !ready {
+                return Err(UserError::busy());
+            }
             st.generating = true;
             let messages = chat::history(&st.settings.system_prompt, &st.turns, &text);
             let id = st.next_turn;
@@ -737,7 +753,7 @@ impl App {
             st.turns.push(turn.clone());
             (turn, messages, st.settings.temperature)
         };
-        *self.inner.gen_cancel.lock().unwrap() = Some(cancel.clone());
+        *self.inner.gen_cancel.lock().unwrap() = Some((turn.id, cancel.clone()));
         self.emit(Event::Generating { generating: true });
         self.emit(Event::TurnStarted { turn: turn.clone() });
         let id = turn.id;
@@ -806,35 +822,43 @@ impl App {
     }
 
     fn finish_turn(&self, id: u64, end: StreamEnd, ep: &Endpoint) {
-        let mut crashed = false;
+        // A crash is only a crash if the server went away, not if we closed it on purpose.
+        let crashed = matches!(end, StreamEnd::ServerGone(_));
         let turn = {
             let mut st = self.inner.state.lock().unwrap();
             st.generating = false;
-            let Some(t) = st.turns.iter_mut().find(|t| t.id == id) else {
-                return;
-            };
-            match end {
-                StreamEnd::Done => t.status = TurnStatus::Done,
-                StreamEnd::Stopped => t.status = TurnStatus::Stopped,
-                StreamEnd::Length => {
-                    t.status = TurnStatus::Cut;
-                    t.error = Some(UserError::context_full());
+            // "New chat" during an answer removes the turn: the answer is over all the same,
+            // and the front ends must still hear that nothing is generating any more.
+            st.turns.iter_mut().find(|t| t.id == id).map(|t| {
+                match end {
+                    StreamEnd::Done => t.status = TurnStatus::Done,
+                    StreamEnd::Stopped => t.status = TurnStatus::Stopped,
+                    StreamEnd::Length => {
+                        t.status = TurnStatus::Cut;
+                        t.error = Some(UserError::context_full());
+                    }
+                    StreamEnd::Failed(e) => {
+                        t.status = TurnStatus::Error;
+                        t.error = Some(e);
+                    }
+                    StreamEnd::ServerGone(detail) => {
+                        t.status = TurnStatus::Error;
+                        t.error = Some(UserError::server_crashed().with_detail(detail));
+                    }
                 }
-                StreamEnd::Failed(e) => {
-                    t.status = TurnStatus::Error;
-                    t.error = Some(e);
-                }
-                StreamEnd::ServerGone(detail) => {
-                    t.status = TurnStatus::Error;
-                    t.error = Some(UserError::server_crashed().with_detail(detail));
-                    crashed = true;
-                }
-            }
-            // Reasoning that never reached an answer still gets a duration for the label.
-            t.clone()
+                t.clone()
+            })
         };
-        *self.inner.gen_cancel.lock().unwrap() = None;
-        self.emit(Event::TurnFinished { turn });
+        {
+            // Only clear our own token: a new answer may already have started.
+            let mut gc = self.inner.gen_cancel.lock().unwrap();
+            if gc.as_ref().map(|(tid, _)| *tid == id).unwrap_or(false) {
+                *gc = None;
+            }
+        }
+        if let Some(turn) = turn {
+            self.emit(Event::TurnFinished { turn });
+        }
         self.emit(Event::Generating { generating: false });
         if crashed {
             let still_same = self
@@ -924,5 +948,81 @@ impl App {
 
     pub fn data_dir(&self) -> &Path {
         &self.inner.paths.home
+    }
+}
+
+/// Which model to load at start: the one the learner used last, else the
+/// pinned default (Gemma 3 1B), else the first usable file. Damaged files never.
+pub fn choose_initial_model(models: &[ModelInfo], last: Option<&str>) -> Option<String> {
+    let usable = |f: &str| models.iter().any(|m| m.file == f && !m.broken);
+    if let Some(f) = last.filter(|f| usable(f)) {
+        return Some(f.to_string());
+    }
+    if let Some(d) = default_model().filter(|d| usable(&d.file)) {
+        return Some(d.file.clone());
+    }
+    models.iter().find(|m| !m.broken).map(|m| m.file.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hardware::RamFit;
+
+    fn model(file: &str, broken: bool) -> ModelInfo {
+        ModelInfo {
+            file: file.into(),
+            name: file.into(),
+            quant: None,
+            size: 1,
+            fit: RamFit::Green,
+            bundled: false,
+            verified: None,
+            broken,
+            has_chat_template: true,
+            reasoning_hint: false,
+            train_context: None,
+            gguf: None,
+        }
+    }
+
+    #[test]
+    fn gemma_1b_is_preselected_whatever_sorts_first() {
+        let m = vec![
+            model("a-model.gguf", false),
+            model("Qwen_Qwen3-0.6B-Q4_K_M.gguf", false),
+            model("gemma-3-1b-it-Q4_K_M.gguf", false),
+        ];
+        assert_eq!(
+            choose_initial_model(&m, None).as_deref(),
+            Some("gemma-3-1b-it-Q4_K_M.gguf")
+        );
+    }
+
+    #[test]
+    fn the_last_used_model_wins_unless_it_is_gone_or_damaged() {
+        let m = vec![
+            model("gemma-3-1b-it-Q4_K_M.gguf", false),
+            model("mine.gguf", false),
+            model("bad.gguf", true),
+        ];
+        assert_eq!(
+            choose_initial_model(&m, Some("mine.gguf")).as_deref(),
+            Some("mine.gguf")
+        );
+        assert_eq!(
+            choose_initial_model(&m, Some("gone.gguf")).as_deref(),
+            Some("gemma-3-1b-it-Q4_K_M.gguf")
+        );
+        assert_eq!(
+            choose_initial_model(&m, Some("bad.gguf")).as_deref(),
+            Some("gemma-3-1b-it-Q4_K_M.gguf")
+        );
+    }
+
+    #[test]
+    fn no_usable_model_means_none() {
+        assert_eq!(choose_initial_model(&[model("bad.gguf", true)], None), None);
+        assert_eq!(choose_initial_model(&[], None), None);
     }
 }

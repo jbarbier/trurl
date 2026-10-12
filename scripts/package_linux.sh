@@ -25,6 +25,8 @@ cp LICENSE "$OUT/licenses/Trurl-MIT.txt"
 cp licenses/*.txt "$OUT/licenses/"
 cp packaging/linux/install.sh "$OUT/install.sh"
 cp packaging/linux/README.txt "$OUT/README.txt"
+# Marks the folder as Trurl's own: the self-updater only ever replaces a marked folder.
+echo "Trurl app folder. Replaced as a whole on update; keep your files elsewhere." > "$OUT/.trurl-app"
 chmod +x "$OUT/trurl" "$OUT/install.sh" "$OUT"/llama/*/llama-server
 
 tar -C dist -czf "dist/$NAME.tar.gz" "$NAME"

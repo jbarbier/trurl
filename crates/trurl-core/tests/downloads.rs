@@ -112,6 +112,7 @@ async fn serve(State(s): State<Arc<Srv>>, headers: HeaderMap) -> Response {
 
 struct Setup {
     downloads: Downloads,
+    base: String,
     srv: Arc<Srv>,
     models: tempfile::TempDir,
     dl_dir: tempfile::TempDir,
@@ -168,6 +169,7 @@ async fn setup(mode: Mode) -> Setup {
     };
     Setup {
         downloads,
+        base: format!("http://{addr}"),
         srv,
         models,
         dl_dir,
@@ -349,4 +351,122 @@ async fn unsafe_remote_names_are_flattened() {
     let name = wait_done(&s).await.unwrap();
     assert_eq!(name, "Mod_le-Q4_K_M.gguf");
     assert!(s.models.path().join(&name).exists());
+}
+
+fn part_len(s: &Setup, id: &str) -> u64 {
+    std::fs::metadata(s.dl_dir.path().join(format!("{id}.part")))
+        .map(|m| m.len())
+        .unwrap_or(0)
+}
+
+/// A download cut by closing the app carries on by itself at the next start,
+/// with a Range request, and ends with the right SHA-256 in the models folder.
+#[tokio::test]
+async fn closing_the_app_then_restarting_resumes_and_finishes() {
+    let s = setup(Mode::DropAfter(800_000, 1)).await;
+    let id = s.downloads.start(s.req.clone()).unwrap();
+    for _ in 0..300 {
+        if part_len(&s, &id) >= 800_000 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    // The app closes: everything stops, and nothing was paused by the learner.
+    s.downloads.pause_all();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let have = part_len(&s, &id);
+    assert!(
+        have > 0 && have < s.srv.data.len() as u64,
+        "kept {have} bytes"
+    );
+    // Next start: a new manager over the same folder.
+    let done: Arc<Mutex<Vec<String>>> = Arc::default();
+    let d2 = done.clone();
+    let again = Downloads::new(
+        s.dl_dir.path().into(),
+        s.models.path().into(),
+        s.base.clone(),
+        trurl_core::net::client_builder().build().unwrap(),
+        Arc::new(|_| {}),
+        Arc::new(move |f| d2.lock().unwrap().push(f)),
+    );
+    assert_eq!(again.resume_interrupted(), 1);
+    for _ in 0..300 {
+        if !done.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let name = done
+        .lock()
+        .unwrap()
+        .first()
+        .cloned()
+        .expect("finished after restart");
+    assert_eq!(
+        std::fs::read(s.models.path().join(name)).unwrap(),
+        s.srv.data
+    );
+    let last = s.srv.ranges.lock().unwrap().last().cloned().flatten();
+    assert!(
+        last.unwrap_or_default().starts_with("bytes="),
+        "resumed with a Range request"
+    );
+}
+
+/// Paused by the learner: stays paused after a restart.
+#[tokio::test]
+async fn a_download_the_learner_paused_stays_paused_after_restart() {
+    let s = setup(Mode::DropAfter(500_000, 100)).await;
+    let id = s.downloads.start(s.req.clone()).unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    s.downloads.pause(&id);
+    let again = Downloads::new(
+        s.dl_dir.path().into(),
+        s.models.path().into(),
+        s.base.clone(),
+        trurl_core::net::client_builder().build().unwrap(),
+        Arc::new(|_| {}),
+        Arc::new(|_| {}),
+    );
+    assert_eq!(again.resume_interrupted(), 0);
+    assert_eq!(again.list()[0].status, DownloadStatus::Paused);
+}
+
+/// Pause then Resume over and over: one writer at a time, and the file is still right.
+#[tokio::test]
+async fn rapid_pause_and_resume_never_corrupts_the_file() {
+    let s = setup(Mode::Good).await;
+    let id = s.downloads.start(s.req.clone()).unwrap();
+    for _ in 0..20 {
+        s.downloads.pause(&id);
+        s.downloads.resume(&id).unwrap();
+    }
+    let name = wait_done(&s).await.unwrap();
+    assert_installed(&s, &name);
+}
+
+/// Cancel while the finished file is being checked: nothing reaches the models folder.
+#[tokio::test]
+async fn cancel_during_the_check_installs_nothing() {
+    let s = setup(Mode::Good).await;
+    let id = s.downloads.start(s.req.clone()).unwrap();
+    for _ in 0..500 {
+        if s.downloads
+            .list()
+            .iter()
+            .any(|d| d.status == DownloadStatus::Verifying)
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    s.downloads.cancel(&id);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        std::fs::read_dir(s.models.path()).unwrap().count(),
+        0,
+        "cancelled download was installed"
+    );
+    assert!(s.done.lock().unwrap().is_empty());
 }

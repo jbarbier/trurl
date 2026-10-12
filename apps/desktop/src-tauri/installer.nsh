@@ -9,7 +9,10 @@
 ;
 ; Never runs during an update (/UPDATE): updates replace the app, not models.
 ;
-; Uninstall: offer to delete the models too (default No; silent uninstall keeps them).
+; Uninstall: the models are deleted only if the learner ticks Tauri's own
+; "Delete the application data" box (never during an update, never in a silent
+; uninstall). No extra question, so an interactive reinstall over an older
+; version never asks about models.
 
 !include "FileFunc.nsh"
 
@@ -41,7 +44,12 @@
           MessageBox MB_OK|MB_ICONEXCLAMATION "Trurl could not copy $R1. Check that the USB stick is still plugged in and that the computer has enough free space. You can import the model later from Trurl's Models screen." /SD IDOK
         ${Else}
           Delete "${TRURL_MODELS}\$R1"
+          ClearErrors
           Rename "${TRURL_MODELS}\$R1.part" "${TRURL_MODELS}\$R1"
+          ${If} ${Errors}
+            Delete "${TRURL_MODELS}\$R1.part"
+            MessageBox MB_OK|MB_ICONEXCLAMATION "Trurl could not finish copying $R1. Close Trurl if it is open, then run this installer again." /SD IDOK
+          ${EndIf}
         ${EndIf}
       ${EndIf}
       FindNext $R0 $R1
@@ -52,9 +60,7 @@
 
 !macro NSIS_HOOK_POSTUNINSTALL
   ${If} $UpdateMode <> 1
-  ${AndIf} ${FileExists} "${TRURL_MODELS}\*.*"
-    MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Also delete your Trurl models?$\r$\n$\r$\nThey are in ${TRURL_MODELS}. Choose No to keep them for a later install." /SD IDNO IDNO trurl_keep_models
-      RMDir /r "${TRURL_DATA}"
-    trurl_keep_models:
+  ${AndIf} $DeleteAppDataCheckboxState = 1
+    RMDir /r "${TRURL_DATA}"
   ${EndIf}
 !macroend

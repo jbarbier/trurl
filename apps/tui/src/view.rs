@@ -139,9 +139,9 @@ fn banner_lines(ui: &Ui, width: usize) -> Vec<Line<'static>> {
     match &ui.update {
         UpdateState::Available(u) => {
             let hint = if ui.generating {
-                "U to update when the answer is finished"
+                "F7 to update when the answer is finished, F8 for later"
             } else {
-                "U to update now, L for later"
+                "F7 to update now, F8 for later"
             };
             out.push(Line::from(vec![
                 Span::styled(
@@ -209,8 +209,8 @@ fn draw_footer(f: &mut Frame, ui: &Ui, area: Rect) {
                     ("Ctrl+N", "new chat"),
                     ("F2", "models"),
                     ("F3", "settings"),
-                    ("F4", "Hugging Face"),
-                    ("F1", "about"),
+                    ("F4", "download"),
+                    ("F1", "help"),
                     ("Ctrl+Q", "quit"),
                 ]
             }
@@ -251,7 +251,7 @@ fn draw_footer(f: &mut Frame, ui: &Ui, area: Rect) {
             format!(" {k} "),
             Style::default().fg(Color::Black).bg(Color::Gray),
         ));
-        spans.push(Span::raw(format!(" {v}  ")));
+        spans.push(Span::raw(format!(" {v} ")));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
@@ -780,7 +780,7 @@ fn draw_hub(f: &mut Frame, ui: &Ui, area: Rect) {
         HubView::Offline => {
             let l = vec![
                 Line::from(Span::styled(
-                    "Connect to the internet to browse Hugging Face.",
+                    "Connect to the internet to browse Hugging Face",
                     Style::default().add_modifier(Modifier::BOLD),
                 )),
                 Line::from(""),

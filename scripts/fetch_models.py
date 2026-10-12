@@ -8,6 +8,7 @@ Usage:
   python3 scripts/fetch_models.py --dest DIR              # every pinned model
   python3 scripts/fetch_models.py --dest DIR --only gemma-3-1b-it,qwen3-0.6b
   python3 scripts/fetch_models.py --dest DIR --link-from OTHER_DIR   # reuse files already on disk
+  python3 scripts/fetch_models.py --dest DIR --test-models           # 1 MB models used by the evals
 """
 
 from __future__ import annotations
@@ -67,12 +68,13 @@ def main() -> None:
     ap.add_argument("--dest", required=True)
     ap.add_argument("--only", default="")
     ap.add_argument("--link-from", default="")
+    ap.add_argument("--test-models", action="store_true", help="fetch the small test-only models instead")
     args = ap.parse_args()
     dest = Path(args.dest).expanduser()
     dest.mkdir(parents=True, exist_ok=True)
     only = {x.strip() for x in args.only.split(",") if x.strip()}
     ok = True
-    for m in PINS["models"]:
+    for m in PINS["test_models"] if args.test_models else PINS["models"]:
         if only and m["id"] not in only:
             continue
         target = dest / m["file"]

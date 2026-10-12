@@ -119,8 +119,15 @@ async fn install_update(app: AppHandle, d: Arc<Desktop>) -> Result<(), UserError
             *d.pending.lock().unwrap() = Some(update);
             return Err(UserError::update_wait_for_answer());
         }
-        d.core.shutdown().await;
-        update.install(bytes).map_err(|e| UserError::update_failed().with_detail(e.to_string()))?;
+        // Stop only the model server (its files are about to be replaced). On Windows
+        // the installer then closes Trurl and starts the new version. If anything
+        // fails before that, the model comes back and Trurl carries on as it was.
+        d.core.release_engine().await;
+        if let Err(e) = update.install(bytes) {
+            d.core.reload();
+            return Err(UserError::update_failed().with_detail(e.to_string()));
+        }
+        // Not reached on Windows (the installer exits the app); harmless elsewhere.
         app.restart();
     }
     .await;

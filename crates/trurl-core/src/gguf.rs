@@ -99,7 +99,17 @@ impl<T: Read + Seek> Reader<T> {
         self.r.read_exact(&mut b)?;
         Ok(u64::from_le_bytes(b))
     }
+    /// Skip `n` bytes. Small skips read through the buffer: seeking a BufReader
+    /// throws its buffer away, and a vocabulary has hundreds of thousands of
+    /// small strings to skip (one seek each would re-read 64 KB every time).
     fn skip(&mut self, n: u64) -> R<()> {
+        if n <= 1 << 20 {
+            let copied = std::io::copy(&mut (&mut self.r).take(n), &mut std::io::sink())?;
+            if copied < n {
+                return Err(GgufError::Truncated);
+            }
+            return Ok(());
+        }
         let n = i64::try_from(n).map_err(|_| GgufError::Malformed("skip too large".into()))?;
         self.r.seek(SeekFrom::Current(n))?;
         Ok(())
@@ -283,8 +293,12 @@ pub fn read_from<T: Read + Seek>(r: T) -> R<GgufInfo> {
     let header_end = rd.r.stream_position()?;
     let data_start = header_end.div_ceil(alignment) * alignment;
     // The last tensor starts at max_offset and holds at least one byte.
+    // Hostile offsets near u64::MAX must not wrap around and pass the size check.
     info.min_file_size = if n_tensors > 0 {
-        data_start + max_offset + 1
+        data_start
+            .checked_add(max_offset)
+            .and_then(|x| x.checked_add(1))
+            .ok_or_else(|| GgufError::Malformed("tensor offset out of range".into()))?
     } else {
         header_end
     };
@@ -497,6 +511,25 @@ mod tests {
             read_from(Cursor::new(&b)),
             Err(GgufError::Malformed(_))
         ));
+    }
+
+    #[test]
+    fn hostile_tensor_offset_does_not_wrap() {
+        let b = build(
+            &[("general.architecture", V::Str("llama"))],
+            &[("w", u64::MAX)],
+            64,
+        );
+        assert!(matches!(
+            read_from(Cursor::new(&b)),
+            Err(GgufError::Malformed(_))
+        ));
+        let b = build(
+            &[("general.architecture", V::Str("llama"))],
+            &[("w", u64::MAX - 100)],
+            64,
+        );
+        assert!(read_from(Cursor::new(&b)).is_err());
     }
 
     #[test]

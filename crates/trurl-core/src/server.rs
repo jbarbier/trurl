@@ -30,7 +30,7 @@ pub struct ServerConfig {
 }
 
 impl ServerConfig {
-    pub fn args(&self, port: u16, api_key: &str) -> Vec<String> {
+    pub fn args(&self, port: u16, key_file: &str) -> Vec<String> {
         vec![
             // Relative to the working directory (the models folder): keeps
             // non-ASCII user names out of the command line.
@@ -58,8 +58,10 @@ impl ServerConfig {
             "127.0.0.1".into(),
             "--port".into(),
             port.to_string(),
-            "--api-key".into(),
-            api_key.to_string(),
+            // From a file, not the command line: other users of the computer can read
+            // command lines (ps), and only Trurl should be able to use this server.
+            "--api-key-file".into(),
+            key_file.to_string(),
         ]
     }
 }
@@ -150,6 +152,34 @@ pub struct Server {
     pub api_key: String,
     pub config: ServerConfig,
     pub log: LogRing,
+    key_file: PathBuf,
+}
+
+/// Key files are named like this inside the models folder (llama-server's working
+/// directory, so the path stays relative and ASCII). Left-overs after a crash are
+/// removed at start by `remove_stale_key_files`.
+const KEY_PREFIX: &str = ".trurl-llama-";
+
+pub fn remove_stale_key_files(models_dir: &Path) {
+    if let Ok(rd) = std::fs::read_dir(models_dir) {
+        for e in rd.flatten() {
+            if e.file_name().to_string_lossy().starts_with(KEY_PREFIX) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+}
+
+fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    o.open(path)?.write_all(text.as_bytes())
 }
 
 impl Server {
@@ -169,8 +199,12 @@ impl Server {
         }
         let port = free_port().map_err(|e| UserError::server_start().with_detail(e.to_string()))?;
         let api_key = random_key();
+        let key_name = format!("{KEY_PREFIX}{port}.key");
+        let key_file = cfg.models_dir.join(&key_name);
+        write_private(&key_file, &api_key)
+            .map_err(|e| UserError::server_start().with_detail(e.to_string()))?;
         let mut cmd = Command::new(&exe);
-        cmd.args(cfg.args(port, &api_key))
+        cmd.args(cfg.args(port, &key_name))
             .current_dir(&cfg.models_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -190,8 +224,13 @@ impl Server {
             }
             cmd.env("LD_LIBRARY_PATH", ld);
         }
-        let mut child = platform::spawn(cmd)
-            .map_err(|e| UserError::server_start().with_detail(e.to_string()))?;
+        let mut child = match platform::spawn(cmd) {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = std::fs::remove_file(&key_file);
+                return Err(UserError::server_start().with_detail(e.to_string()));
+            }
+        };
         let log = LogRing::default();
         for stream in [
             child
@@ -222,6 +261,7 @@ impl Server {
             api_key,
             config: cfg.clone(),
             log,
+            key_file,
         })
     }
 
@@ -268,6 +308,7 @@ impl Server {
     pub fn stop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        let _ = std::fs::remove_file(&self.key_file);
     }
 
     pub fn pid(&self) -> u32 {
@@ -427,10 +468,10 @@ mod tests {
             threads: 4,
             variant: CpuVariant::Avx2,
         };
-        let a = c.args(5555, "k").join(" ");
+        let a = c.args(5555, ".trurl-llama-5555.key").join(" ");
         assert_eq!(
             a,
-            "-m gemma.gguf -c 2048 -t 4 -np 1 --cache-ram 0 --fit off --jinja --reasoning-format deepseek --no-webui --offline --host 127.0.0.1 --port 5555 --api-key k"
+            "-m gemma.gguf -c 2048 -t 4 -np 1 --cache-ram 0 --fit off --jinja --reasoning-format deepseek --no-webui --offline --host 127.0.0.1 --port 5555 --api-key-file .trurl-llama-5555.key"
         );
     }
 

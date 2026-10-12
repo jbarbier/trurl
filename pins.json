@@ -88,5 +88,16 @@
   "build_tools": {
     "cmake": "3.31.6",
     "ninja": "1.12.1"
-  }
+  },
+  "test_models": [
+    {
+      "id": "stories260k",
+      "name": "stories260K (test only: a base model without a chat template)",
+      "repo": "ggml-org/test-model-stories260K",
+      "revision": "479896ec924af6d40fd419ab8f4d1eb2101de00d",
+      "file": "stories260K-f32.gguf",
+      "size": 1185376,
+      "sha256": "270cba1bd5109f42d03350f60406024560464db173c0e387d91f0426d3bd256d"
+    }
+  ]
 }

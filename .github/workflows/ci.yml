@@ -17,6 +17,9 @@ env:
   CARGO_TERM_COLOR: always
   TRURL_TEST_MODELS: ${{ github.workspace }}/../trurl-models
 
+# No job here sees the real update-signing key: builds do not sign
+# (createUpdaterArtifacts is off), and the update test uses a throwaway key.
+
 jobs:
   gates:
     name: Gates (fmt, clippy, unit tests, repo checks)
@@ -30,7 +33,7 @@ jobs:
             ~/.cargo/git
             target
           key: gates-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-      - run: rustup show active-toolchain || rustup toolchain install
+      - run: rustup toolchain install
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
@@ -58,6 +61,7 @@ jobs:
             ${{ env.TRURL_TEST_MODELS }}
           key: llama-models-linux-${{ hashFiles('pins.json', 'scripts/build_llama.py') }}
       - run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - run: rustup toolchain install
       - name: Build llama-server (avx2, avx, compat)
         run: test -x vendor/llama/linux/compat/llama-server || python3 scripts/build_llama.py
       - name: Each llama-server build uses only its CPU tier's instructions
@@ -95,6 +99,7 @@ jobs:
             vendor/llama
             ${{ env.TRURL_TEST_MODELS }}
           key: llama-models-windows-${{ hashFiles('pins.json', 'scripts/build_llama.py') }}
+      - run: rustup toolchain install
       - name: Build llama-server (avx2, avx, compat), static, no VC++ runtime
         run: if (-not (Test-Path vendor/llama/windows/compat/llama-server.exe)) { python scripts/build_llama.py }
       - name: Check llama-server needs no DLL beyond Windows itself
@@ -112,12 +117,9 @@ jobs:
           node-version: "22"
       - name: Icons from branding/app-icon.svg
         run: npx --yes @tauri-apps/cli@2.12.2 icon branding/app-icon.svg -o apps/desktop/src-tauri/icons
-      - name: Build the installer
+      - name: Build the USB installer
         working-directory: apps/desktop
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx --yes @tauri-apps/cli@2.12.2 build
+        run: npx --yes @tauri-apps/cli@2.12.2 build --config src-tauri/tauri.usb.conf.json
       - name: Install from a USB-style folder, run offline, chat, uninstall
         run: ./scripts/windows_smoke.ps1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -127,4 +129,42 @@ jobs:
           path: |
             target/release/bundle/nsis/*.exe
             target/e2e/
+          if-no-files-found: ignore
+
+  windows-update:
+    name: Windows self-update, version N to N+1, models kept
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: windows-update-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+      - name: Cache llama.cpp source, builds and models
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/.cache/trurl
+            vendor/llama
+            ${{ env.TRURL_TEST_MODELS }}
+          key: llama-models-windows-${{ hashFiles('pins.json', 'scripts/build_llama.py') }}
+      - run: rustup toolchain install
+      - run: if (-not (Test-Path vendor/llama/windows/compat/llama-server.exe)) { python scripts/build_llama.py }
+      - run: python scripts/fetch_models.py --dest $env:TRURL_TEST_MODELS --only qwen3-0.6b
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - run: npx --yes @tauri-apps/cli@2.12.2 icon branding/app-icon.svg -o apps/desktop/src-tauri/icons
+      - name: Build N, install it, build and sign N+1, update through the real window
+        run: ./scripts/windows_update_test.ps1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: windows-update-screenshots
+          path: target/e2e/
           if-no-files-found: ignore

@@ -26,26 +26,38 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "publisher": "Cyberiad Labs",
     "copyright": "Copyright (c) 2026 Cyberiad Labs. MIT License.",
     "category": "Education",
     "shortDescription": "Run open-weight language models offline, to learn how they work.",
     "longDescription": "Trurl runs small open-weight language models on your own computer, without internet, so you can see how they work: the system prompt, the temperature, the context window and the model's reasoning.",
     "homepage": "https://github.com/jbarbier/trurl",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
     "licenseFile": "../../../licenses/INSTALLER.txt",
     "resources": {
       "../../../vendor/llama/windows/": "llama/",
       "../../../licenses/": "licenses/"
     },
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "windows": {
-      "webviewInstallMode": { "type": "embedBootstrapper", "silent": true },
+      "webviewInstallMode": {
+        "type": "embedBootstrapper",
+        "silent": true
+      },
       "nsis": {
         "installMode": "currentUser",
         "installerHooks": "./installer.nsh",
-        "languages": ["English"],
+        "languages": [
+          "English"
+        ],
         "displayLanguageSelector": false,
         "installerIcon": "icons/icon.ico"
       }
@@ -54,8 +66,13 @@
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY2QjFGRTA4RUNGNUZGRUIKUldUci8vWHNDUDZ4WnJpQVNvaitQZXZEMmlFcnc1RlNla3p3RmxNQ2hoMHdKNm9BQi9GUm85enAK",
-      "endpoints": ["https://github.com/jbarbier/trurl/releases/latest/download/latest.json"],
-      "windows": { "installMode": "passive" }
+      "endpoints": [
+        "https://github.com/jbarbier/trurl/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      },
+      "requireSignedVersion": true
     }
   }
 }

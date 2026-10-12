@@ -235,8 +235,9 @@ async fn handle(
         },
         Msg::Update(r, manual) => match r {
             Ok(Some(u)) => {
-                if !matches!(ui.update, UpdateState::Hidden(ref h) if h.version == u.version && !manual)
-                {
+                // "Later" hides the offer until the next check (at start or every 24 hours):
+                // every check, automatic or not, shows it again. Never during a download.
+                if !matches!(ui.update, UpdateState::Downloading(..)) {
                     ui.update = UpdateState::Available(u);
                 }
                 ui.update_msg = None;
@@ -262,6 +263,13 @@ async fn handle(
                 ui.update_msg = Some("Update installed. Restarting Trurl…".into());
                 ui.quit = true;
                 return Some(exe);
+            }
+            Err(e) if e.code == trurl_core::ErrorCode::UpdateBusy => {
+                // An answer started during the download: offer again when it is done.
+                ui.notice = Some(e);
+                if let UpdateState::Downloading(u, _, _) = &ui.update {
+                    ui.update = UpdateState::Available(u.clone());
+                }
             }
             Err(e) => ui.update = UpdateState::Failed(e),
         },
@@ -357,20 +365,13 @@ async fn on_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: Key
         }
         _ => {}
     }
-    if let (Some('u' | 'U'), true) = (
-        char_of(&k),
-        matches!(ui.update, UpdateState::Available(_))
-            && ui.screen == Screen::Chat
-            && ui.input.text.is_empty(),
-    ) {
+    // Update keys are function keys: a plain letter would steal the first letter of a message.
+    if k.code == KeyCode::F(7) && matches!(ui.update, UpdateState::Available(_)) {
         start_update(ui, core, tx);
         return;
     }
-    if let (Some('l' | 'L'), UpdateState::Available(u)) = (char_of(&k), &ui.update)
-        && ui.screen == Screen::Chat
-        && ui.input.text.is_empty()
-    {
-        ui.update = UpdateState::Hidden(u.clone());
+    if k.code == KeyCode::F(8) && matches!(ui.update, UpdateState::Available(_)) {
+        ui.update = UpdateState::Hidden;
         return;
     }
 
@@ -395,18 +396,6 @@ async fn on_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: Key
             }
             _ => edit(&mut ui.token, &k, false),
         },
-    }
-}
-
-fn char_of(k: &KeyEvent) -> Option<char> {
-    match k.code {
-        KeyCode::Char(c)
-            if !k.modifiers.contains(KeyModifiers::CONTROL)
-                && !k.modifiers.contains(KeyModifiers::ALT) =>
-        {
-            Some(c)
-        }
-        _ => None,
     }
 }
 

@@ -33,6 +33,7 @@ rm -rf "$APP.new"
 mkdir -p "$APP.new"
 cp -R "$HERE/trurl" "$HERE/llama" "$HERE/licenses" "$APP.new/"
 cp "$HERE/install.sh" "$APP.new/install.sh"
+echo "Trurl app folder. Replaced as a whole on update; keep your files elsewhere." > "$APP.new/.trurl-app"
 [ -f "$HERE/README.txt" ] && cp "$HERE/README.txt" "$APP.new/"
 chmod +x "$APP.new/trurl" "$APP.new"/llama/*/llama-server
 rm -rf "$APP.old"
@@ -42,7 +43,7 @@ rm -rf "$APP.old"
 ln -sf "$APP/trurl" "$BIN/trurl"
 
 # Models next to this installer (the USB package) are copied in, never moved.
-for dir in "$HERE/models" "$HERE/../models"; do
+for dir in "$HERE/models" "$HERE/../models" "$HERE/../../models"; do
   [ -d "$dir" ] || continue
   for f in "$dir"/*.gguf; do
     [ -f "$f" ] || continue

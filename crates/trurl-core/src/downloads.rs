@@ -54,6 +54,10 @@ pub struct DownloadInfo {
     /// Bytes per second over the last few seconds (0 when not running).
     #[serde(default)]
     pub rate: u64,
+    /// The learner pressed Pause. Downloads cut by closing Trurl (or by a crash)
+    /// carry on by themselves at the next start; paused ones wait for Resume.
+    #[serde(default)]
+    pub user_paused: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +106,19 @@ type OnDone = Arc<dyn Fn(String) + Send + Sync>;
 struct Entry {
     info: DownloadInfo,
     cancel: Option<CancellationToken>,
+    /// Held by the task that downloads this entry, so a quick Pause then Resume
+    /// can never have two tasks writing the same file.
+    run_lock: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl Entry {
+    fn new(info: DownloadInfo) -> Self {
+        Entry {
+            info,
+            cancel: None,
+            run_lock: Arc::default(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -169,6 +186,7 @@ impl Downloads {
     }
 
     /// Jobs left from a previous run come back paused, with their bytes.
+    /// `resume_interrupted` then restarts the ones the learner did not pause.
     fn restore(&self) {
         let Ok(rd) = std::fs::read_dir(&self.inner.dir) else {
             return;
@@ -192,8 +210,25 @@ impl Downloads {
             if info.status != DownloadStatus::Failed {
                 info.status = DownloadStatus::Paused;
             }
-            map.insert(info.id.clone(), Entry { info, cancel: None });
+            map.insert(info.id.clone(), Entry::new(info));
         }
+    }
+
+    /// Carry on with downloads that were running when Trurl last closed. Must be
+    /// called inside a tokio runtime. Returns how many were restarted.
+    pub fn resume_interrupted(&self) -> usize {
+        let ids: Vec<String> = self
+            .inner
+            .entries
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|e| e.info.status == DownloadStatus::Paused && !e.info.user_paused)
+            .map(|e| e.info.id.clone())
+            .collect();
+        ids.iter()
+            .filter(|id| self.resume_inner(id, false).is_ok())
+            .count()
     }
 
     pub fn list(&self) -> Vec<DownloadInfo> {
@@ -259,14 +294,20 @@ impl Downloads {
                 status: DownloadStatus::Running,
                 error: None,
                 rate: 0,
+                user_paused: false,
             };
-            map.insert(id.clone(), Entry { info, cancel: None });
+            map.insert(id.clone(), Entry::new(info));
         }
         self.resume(&id)?;
         Ok(id)
     }
 
+    /// The learner pressed Resume (or Try again).
     pub fn resume(&self, id: &str) -> Result<(), UserError> {
+        self.resume_inner(id, true)
+    }
+
+    fn resume_inner(&self, id: &str, by_learner: bool) -> Result<(), UserError> {
         let token = CancellationToken::new();
         let info = {
             let mut map = self.inner.entries.lock().unwrap();
@@ -279,6 +320,9 @@ impl Downloads {
             e.cancel = Some(token.clone());
             e.info.status = DownloadStatus::Running;
             e.info.error = None;
+            if by_learner {
+                e.info.user_paused = false;
+            }
             e.info.clone()
         };
         let remaining = info.size.saturating_sub(info.done);
@@ -305,6 +349,7 @@ impl Downloads {
             let Some(e) = map.get_mut(id) else { return };
             e.info.status = DownloadStatus::Paused;
             e.info.rate = 0;
+            e.info.user_paused = true;
             e.cancel.take()
         };
         if let Some(t) = token {
@@ -327,21 +372,23 @@ impl Downloads {
         self.emit();
     }
 
-    /// Pause everything (app exit). The bytes stay for next time.
+    /// Stop everything at app exit. The bytes stay, and these downloads carry
+    /// on by themselves at the next start (the learner did not pause them).
     pub fn pause_all(&self) {
-        let ids: Vec<String> = self.inner.entries.lock().unwrap().keys().cloned().collect();
-        for id in ids {
-            let running = self
-                .inner
-                .entries
-                .lock()
-                .unwrap()
-                .get(&id)
-                .map(|e| e.cancel.is_some())
-                .unwrap_or(false);
-            if running {
-                self.pause(&id);
-            }
+        let tokens: Vec<(String, CancellationToken)> = {
+            let mut map = self.inner.entries.lock().unwrap();
+            map.values_mut()
+                .filter_map(|e| {
+                    let t = e.cancel.take()?;
+                    e.info.status = DownloadStatus::Paused;
+                    e.info.rate = 0;
+                    Some((e.info.id.clone(), t))
+                })
+                .collect()
+        };
+        for (id, t) in tokens {
+            t.cancel();
+            self.update(&id, |_| {});
         }
     }
 
@@ -370,11 +417,36 @@ impl Downloads {
     }
 
     async fn run(&self, id: String, cancel: CancellationToken) {
+        let Some(lock) = self
+            .inner
+            .entries
+            .lock()
+            .unwrap()
+            .get(&id)
+            .map(|e| e.run_lock.clone())
+        else {
+            return;
+        };
+        // Wait for a previous task on this download (paused a moment ago) to let go of the file.
+        let _running = lock.lock().await;
+        if cancel.is_cancelled() {
+            return;
+        }
         let mut attempt = 0usize;
         loop {
+            let before = std::fs::metadata(self.part_path(&id))
+                .map(|m| m.len())
+                .unwrap_or(0);
             let r = self.fetch(&id, &cancel).await;
             if cancel.is_cancelled() {
                 return; // paused or cancelled; state already updated
+            }
+            // Any progress means the connection works: give the next drop a full set of retries.
+            let after = std::fs::metadata(self.part_path(&id))
+                .map(|m| m.len())
+                .unwrap_or(0);
+            if after > before {
+                attempt = 0;
             }
             match r {
                 Ok(()) => break,
@@ -411,9 +483,20 @@ impl Downloads {
         let Some(info) = self.info(&id) else { return };
         let part = self.part_path(&id);
         let models_dir = self.inner.models_dir.clone();
-        let verified =
-            tokio::task::spawn_blocking(move || verify_and_install(&part, &info, &models_dir))
-                .await;
+        let (check_part, check_info) = (part.clone(), info.clone());
+        let checked = tokio::task::spawn_blocking(move || verify(&check_part, &check_info)).await;
+        if cancel.is_cancelled() {
+            // Cancelled or paused while the file was being checked: do not install it.
+            if self.info(&id).is_none() {
+                let _ = std::fs::remove_file(&part);
+            }
+            return;
+        }
+        let verified = match checked {
+            Ok(Ok(())) => Ok(install(&part, &info, &models_dir)),
+            Ok(Err(e)) => Ok(Err(e)),
+            Err(e) => Err(e),
+        };
         match verified {
             Ok(Ok(name)) => {
                 let _ = std::fs::remove_file(self.job_path(&id));
@@ -578,11 +661,7 @@ pub fn content_range_start(v: &str) -> Option<u64> {
     s.trim().parse().ok()
 }
 
-fn verify_and_install(
-    part: &Path,
-    info: &DownloadInfo,
-    models_dir: &Path,
-) -> Result<String, UserError> {
+fn verify(part: &Path, info: &DownloadInfo) -> Result<(), UserError> {
     if let Some(expected) = &info.sha256 {
         let got = crate::models::sha256_file(part, |_| {})
             .map_err(|e| UserError::download_failed().with_detail(e.to_string()))?;
@@ -594,16 +673,48 @@ fn verify_and_install(
     if let Err(e) = crate::gguf::read(part) {
         return Err(UserError::download_corrupt(&info.dest_file).with_detail(e.to_string()));
     }
+    Ok(())
+}
+
+/// Move a verified file into the models folder under a name nobody else holds.
+/// The name is claimed by creating it (create_new is atomic), then replaced by
+/// the download, so two downloads with the same name never overwrite each other.
+fn install(part: &Path, info: &DownloadInfo, models_dir: &Path) -> Result<String, UserError> {
     std::fs::create_dir_all(models_dir)
         .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
-    let dest = crate::models::unique_dest(models_dir, &info.dest_file);
+    let dest = claim_dest(models_dir, &info.dest_file)
+        .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
     if std::fs::rename(part, &dest).is_err() {
         // Different volume (TRURL_HOME split): copy then remove.
-        std::fs::copy(part, &dest)
-            .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
+        if let Err(e) = std::fs::copy(part, &dest) {
+            let _ = std::fs::remove_file(&dest);
+            return Err(UserError::from_io_write(&e, UserError::download_failed()));
+        }
         let _ = std::fs::remove_file(part);
     }
     Ok(dest.file_name().unwrap().to_string_lossy().into_owned())
+}
+
+pub fn claim_dest(dir: &Path, file: &str) -> std::io::Result<PathBuf> {
+    let stem = file.trim_end_matches(".gguf");
+    for i in 1..10_000 {
+        let name = if i == 1 {
+            file.to_string()
+        } else {
+            format!("{stem}-{i}.gguf")
+        };
+        let p = dir.join(name);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&p)
+        {
+            Ok(_) => return Ok(p),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::other("no free file name"))
 }
 
 #[cfg(test)]
@@ -629,6 +740,15 @@ mod tests {
         assert_eq!(content_range_start("bytes 0-0/1"), Some(0));
         assert_eq!(content_range_start("bytes */200"), None);
         assert_eq!(content_range_start("garbage"), None);
+    }
+
+    #[test]
+    fn claiming_a_name_never_reuses_one() {
+        let d = tempfile::tempdir().unwrap();
+        let a = claim_dest(d.path(), "m.gguf").unwrap();
+        let b = claim_dest(d.path(), "m.gguf").unwrap();
+        assert_ne!(a, b);
+        assert_eq!(b.file_name().unwrap(), "m-2.gguf");
     }
 
     #[test]

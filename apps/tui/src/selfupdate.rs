@@ -34,12 +34,21 @@ fn app_dir() -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-/// Linux only, and only if Trurl may write next to its own folder.
+/// Marker written by the release tarball and install.sh: this folder holds only
+/// Trurl, so replacing it as a whole is safe. Without it (Trurl run from a
+/// folder holding other things, like the Desktop) Trurl never touches the folder.
+pub const MARKER: &str = ".trurl-app";
+
+/// Linux only, only inside a folder marked as Trurl's own, and only if Trurl may
+/// write next to it.
 pub fn can_install() -> bool {
     if !cfg!(target_os = "linux") {
         return false;
     }
     let Some(dir) = app_dir() else { return false };
+    if !dir.join(MARKER).is_file() {
+        return false;
+    }
     let Some(parent) = dir.parent() else {
         return false;
     };
@@ -82,12 +91,26 @@ pub async fn install(
         let _ = std::fs::remove_dir_all(&staging);
         return Err(UserError::update_failed().with_detail("the update has no trurl program in it"));
     }
-    // From here on the old llama-server must not be running from the old folder.
-    core.shutdown().await;
-    std::fs::rename(&dir, &old)
-        .map_err(|e| UserError::update_failed().with_detail(e.to_string()))?;
+    if !staging.join(MARKER).is_file() {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(UserError::update_failed().with_detail("the update is not a Trurl app folder"));
+    }
+    // An answer may have started while the update downloaded: never cut it off.
+    if core.is_generating() {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(UserError::update_wait_for_answer());
+    }
+    // From here on the old llama-server must not run from the old folder. If the
+    // swap fails, the model comes back and Trurl carries on with the old version.
+    core.release_engine().await;
+    if let Err(e) = std::fs::rename(&dir, &old) {
+        let _ = std::fs::remove_dir_all(&staging);
+        core.reload();
+        return Err(UserError::update_failed().with_detail(e.to_string()));
+    }
     if let Err(e) = std::fs::rename(&staging, &dir) {
         let _ = std::fs::rename(&old, &dir);
+        core.reload();
         return Err(UserError::update_failed().with_detail(e.to_string()));
     }
     let _ = std::fs::remove_dir_all(&old);
