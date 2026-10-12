@@ -1,0 +1,12 @@
+[package]
+name = "trurl-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "trurl"
+path = "src/main.rs"
+
+[dependencies]
+trurl-core.workspace = true

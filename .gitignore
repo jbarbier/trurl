@@ -5,3 +5,9 @@ dist/
 *.key
 .env
 /vendor/
+/apps/desktop/src-tauri/icons/
+/apps/desktop/src-tauri/gen/
+/apps/desktop/src-tauri/resources/
+/dist/
+*.part
+__pycache__/

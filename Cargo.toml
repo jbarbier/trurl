@@ -1,0 +1,46 @@
+[workspace]
+resolver = "3"
+members = ["crates/trurl-core", "apps/tui", "apps/bridge", "apps/desktop/src-tauri"]
+# The desktop shell needs the platform webview to build (WebView2 on Windows,
+# webkit2gtk on Linux). Everything else builds anywhere, so `cargo test` at the
+# root skips it; CI builds it on Windows.
+default-members = ["crates/trurl-core", "apps/tui", "apps/bridge"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/jbarbier/trurl"
+authors = ["Cyberiad Labs"]
+rust-version = "1.99"
+
+# Exact versions: the build never changes unless a maintainer changes it.
+# Cargo.lock pins the transitive tree.
+[workspace.dependencies]
+trurl-core = { path = "crates/trurl-core" }
+anyhow = "=1.0.104"
+bytes = "=1.12.1"
+dirs = "=7.0.0"
+futures-util = "=0.3.34"
+hex = "=0.4.3"
+libc = "=0.2.189"
+minisign-verify = "=0.3.0"
+rand = "=0.10.3"
+reqwest = { version = "=0.13.5", default-features = false, features = ["default-tls", "stream", "json", "http2", "system-proxy"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+sha2 = "=0.11.0"
+sysinfo = { version = "=0.39.6", default-features = false, features = ["system"] }
+tempfile = "=3.27.0"
+thiserror = "=2.0.21"
+tokio = { version = "=1.53.2", features = ["rt-multi-thread", "macros", "process", "fs", "io-util", "time", "sync", "net", "signal"] }
+tokio-util = "=0.7.19"
+axum = "=0.8.9"
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security", "Win32_Storage_FileSystem"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

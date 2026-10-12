@@ -1,0 +1,95 @@
+{
+  "schema": 1,
+  "app": {
+    "name": "Trurl",
+    "version": "0.1.0",
+    "identifier": "com.cyberiadlabs.trurl"
+  },
+  "rust": "1.99.0",
+  "llama_cpp": {
+    "release": "v0.6.0",
+    "build": "b11429",
+    "commit": "d81235049384534c167caea52b85a694f6103d14",
+    "license": "MIT",
+    "assets": {
+      "windows-x64": {
+        "file": "llama-b11429-bin-win-cpu-x64.zip",
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/llama-b11429-bin-win-cpu-x64.zip",
+        "sha256": "1283323272b04cd07905816a597a0da810918102de958f4ff6f7bbaa70ed2efe"
+      },
+      "linux-x64": {
+        "file": "llama-b11429-bin-ubuntu-x64.tar.gz",
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/llama-b11429-bin-ubuntu-x64.tar.gz",
+        "sha256": "f6d25dde8f51133143d1453da4fd5f73b145127177612a283bf7995957af3392"
+      }
+    },
+    "cpu_variants": {
+      "avx2": ["haswell", "skylakex", "icelake", "alderlake", "cannonlake", "cascadelake", "cooperlake", "sapphirerapids", "zen4"],
+      "compat": ["x64", "sse42", "sandybridge", "ivybridge", "piledriver"]
+    }
+  },
+  "models": [
+    {
+      "id": "gemma-3-1b-it",
+      "name": "Gemma 3 1B Instruct",
+      "repo": "ggml-org/gemma-3-1b-it-GGUF",
+      "revision": "f9c28bcd85737ffc5aef028638d3341d49869c27",
+      "file": "gemma-3-1b-it-Q4_K_M.gguf",
+      "size": 806058240,
+      "sha256": "8ccc5cd1f1b3602548715ae25a66ed73fd5dc68a210412eea643eb20eb75a135",
+      "license": "Gemma Terms of Use",
+      "license_file": "licenses/Gemma-Terms-of-Use.txt",
+      "default": true
+    },
+    {
+      "id": "gemma-3-4b-it",
+      "name": "Gemma 3 4B Instruct",
+      "repo": "ggml-org/gemma-3-4b-it-GGUF",
+      "revision": "d0976223747697cb51e056d85c532013931fe52e",
+      "file": "gemma-3-4b-it-Q4_K_M.gguf",
+      "size": 2489757856,
+      "sha256": "882e8d2db44dc554fb0ea5077cb7e4bc49e7342a1f0da57901c0802ea21a0863",
+      "license": "Gemma Terms of Use",
+      "license_file": "licenses/Gemma-Terms-of-Use.txt",
+      "default": false
+    },
+    {
+      "id": "qwen3-0.6b",
+      "name": "Qwen3 0.6B",
+      "repo": "bartowski/Qwen_Qwen3-0.6B-GGUF",
+      "revision": "60b85c0e3d8fe0f6474f406922a26d12aca4550d",
+      "file": "Qwen_Qwen3-0.6B-Q4_K_M.gguf",
+      "size": 484220320,
+      "sha256": "9acfc1e001311f34b4252001b626f2e466d592a42065f66571bff3790d4e1b14",
+      "license": "Apache-2.0",
+      "license_file": "licenses/Qwen3-Apache-2.0.txt",
+      "default": false
+    }
+  ],
+  "vendored": [
+    {
+      "path": "apps/desktop/ui/vendor/marked.umd.js",
+      "package": "marked",
+      "version": "18.0.14",
+      "url": "https://cdn.jsdelivr.net/npm/marked@18.0.14/lib/marked.umd.js",
+      "license": "MIT",
+      "sha256": "21568877a938d2c4e7d74e27f18e60da96bb73a68809610ca39216e1efebae62"
+    },
+    {
+      "path": "apps/desktop/ui/vendor/purify.min.js",
+      "package": "dompurify",
+      "version": "3.4.16",
+      "url": "https://cdn.jsdelivr.net/npm/dompurify@3.4.16/dist/purify.min.js",
+      "license": "MPL-2.0 OR Apache-2.0",
+      "sha256": "2c90a9b46d6463f26038a29b686e82bc91de01fdac9d5229e7cfe3b360134ea2"
+    },
+    {
+      "path": "apps/desktop/ui/fonts/sora-latin.woff2",
+      "package": "Sora (latin subset, weights 500-600)",
+      "version": "Cyberiad Labs subset",
+      "url": "",
+      "license": "OFL-1.1",
+      "sha256": "811e11966d29f3a01fcb19b087b61ac067d380665a55aebb7fcdf2cda95e4a93"
+    }
+  ]
+}
