@@ -89,8 +89,12 @@ async function useModel(name) {
   const row = page.locator("#modelList li").filter({ hasText: name });
   if (await row.getByRole("button", { name: `Use ${name}` }).count()) await row.getByRole("button", { name: `Use ${name}` }).click();
   else await closeDialogs();
-  await waitPill("Ready", 300000);
-  if (!(await page.locator("#chatTitle").innerText()).includes(name)) throw new Error(`header does not show ${name}`);
+  // Wait for the NEW model to be ready, not the old one still showing Ready.
+  await page.waitForFunction(
+    (n) => document.querySelector("#chatTitle")?.innerText.includes(n) && document.querySelector("#pill")?.innerText.includes("Ready"),
+    name,
+    { timeout: 300000 }
+  );
 }
 
 // ----- suites ---------------------------------------------------------------
