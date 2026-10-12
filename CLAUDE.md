@@ -1,4 +1,4 @@
-# CLAUDE.md — Trurl
+# CLAUDE.md for Trurl
 
 Rules for anyone (human or agent) changing Trurl. The general working rules (triage,
 branching, tests and evals, critic loop, self-rating, safety, voice) are the public

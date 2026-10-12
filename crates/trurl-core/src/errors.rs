@@ -30,6 +30,8 @@ pub enum ErrorCode {
     NotGguf,
     DeleteFailed,
     UpdateFailed,
+    UpdateCheckFailed,
+    UpdateBusy,
     Internal,
 }
 
@@ -46,7 +48,12 @@ pub struct UserError {
 
 impl UserError {
     pub fn new(code: ErrorCode, title: impl Into<String>, hint: impl Into<String>) -> Self {
-        Self { code, title: title.into(), hint: hint.into(), detail: None }
+        Self {
+            code,
+            title: title.into(),
+            hint: hint.into(),
+            detail: None,
+        }
     }
 
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
@@ -217,6 +224,22 @@ impl UserError {
         )
     }
 
+    pub fn update_check_failed() -> Self {
+        Self::new(
+            ErrorCode::UpdateCheckFailed,
+            "Trurl could not check for updates.",
+            "Connect to the internet and try again. Trurl works the same without updates.",
+        )
+    }
+
+    pub fn update_wait_for_answer() -> Self {
+        Self::new(
+            ErrorCode::UpdateBusy,
+            "Trurl is writing an answer.",
+            "Wait until the answer is finished, or press Stop, then click Update now again.",
+        )
+    }
+
     pub fn internal(detail: impl Into<String>) -> Self {
         Self::new(
             ErrorCode::Internal,
@@ -228,7 +251,11 @@ impl UserError {
 
     /// Map an I/O error during a write to the most useful learner message.
     pub fn from_io_write(e: &std::io::Error, fallback: UserError) -> Self {
-        if is_disk_full(e) { Self::disk_full().with_detail(e.to_string()) } else { fallback.with_detail(e.to_string()) }
+        if is_disk_full(e) {
+            Self::disk_full().with_detail(e.to_string())
+        } else {
+            fallback.with_detail(e.to_string())
+        }
     }
 }
 
@@ -274,6 +301,8 @@ mod tests {
             UserError::not_gguf("f.txt"),
             UserError::delete_failed("f.gguf"),
             UserError::update_failed(),
+            UserError::update_check_failed(),
+            UserError::update_wait_for_answer(),
             UserError::internal("x"),
         ]
     }
@@ -283,7 +312,11 @@ mod tests {
         for e in all() {
             assert!(e.title.ends_with('.'), "{:?}", e.code);
             assert!(e.hint.len() > 10, "{:?} needs a real hint", e.code);
-            assert!(!e.title.contains('—') && !e.hint.contains('—'), "no em dashes: {:?}", e.code);
+            assert!(
+                !e.title.contains('—') && !e.hint.contains('—'),
+                "no em dashes: {:?}",
+                e.code
+            );
         }
     }
 
@@ -299,7 +332,10 @@ mod tests {
     #[test]
     fn empty_detail_is_dropped() {
         assert_eq!(UserError::busy().with_detail("  ").detail, None);
-        assert_eq!(UserError::busy().with_detail("x").detail.as_deref(), Some("x"));
+        assert_eq!(
+            UserError::busy().with_detail("x").detail.as_deref(),
+            Some("x")
+        );
     }
 
     #[test]

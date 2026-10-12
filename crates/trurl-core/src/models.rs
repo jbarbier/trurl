@@ -34,11 +34,15 @@ pub struct ModelInfo {
 
 /// List every usable model in `dir`, sorted with the default model first, then by size.
 pub fn scan(dir: &Path, total_ram: u64, verified: &VerifiedCache) -> Vec<ModelInfo> {
-    let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
     for e in rd.flatten() {
         let p = e.path();
-        let Some(file) = p.file_name().and_then(|n| n.to_str()).map(str::to_string) else { continue };
+        let Some(file) = p.file_name().and_then(|n| n.to_str()).map(str::to_string) else {
+            continue;
+        };
         if !file.to_ascii_lowercase().ends_with(".gguf") || file.starts_with('.') {
             continue;
         }
@@ -47,7 +51,9 @@ pub fn scan(dir: &Path, total_ram: u64, verified: &VerifiedCache) -> Vec<ModelIn
             continue;
         }
         // Follow symlinks: a teacher may link a model instead of copying it.
-        let Ok(meta) = std::fs::metadata(&p) else { continue };
+        let Ok(meta) = std::fs::metadata(&p) else {
+            continue;
+        };
         if !meta.is_file() {
             continue;
         }
@@ -56,12 +62,20 @@ pub fn scan(dir: &Path, total_ram: u64, verified: &VerifiedCache) -> Vec<ModelIn
     out.sort_by(|a, b| {
         let da = pinned_model(&a.file).map(|m| !m.default).unwrap_or(true);
         let db = pinned_model(&b.file).map(|m| !m.default).unwrap_or(true);
-        da.cmp(&db).then(a.size.cmp(&b.size)).then(a.file.cmp(&b.file))
+        da.cmp(&db)
+            .then(a.size.cmp(&b.size))
+            .then(a.file.cmp(&b.file))
     });
     out
 }
 
-fn describe(path: &Path, file: &str, size: u64, total_ram: u64, verified: &VerifiedCache) -> ModelInfo {
+fn describe(
+    path: &Path,
+    file: &str,
+    size: u64,
+    total_ram: u64,
+    verified: &VerifiedCache,
+) -> ModelInfo {
     let header = gguf::read(path);
     let pin = pinned_model(file);
     let (gguf, broken) = match header {
@@ -86,7 +100,10 @@ fn describe(path: &Path, file: &str, size: u64, total_ram: u64, verified: &Verif
         verified: v,
         broken: broken || v == Some(false),
         has_chat_template: gguf.as_ref().map(|g| g.has_chat_template).unwrap_or(false),
-        reasoning_hint: gguf.as_ref().map(|g| g.template_mentions_thinking).unwrap_or(false),
+        reasoning_hint: gguf
+            .as_ref()
+            .map(|g| g.template_mentions_thinking)
+            .unwrap_or(false),
         train_context: gguf.as_ref().and_then(|g| g.context_length),
         gguf,
     }
@@ -94,9 +111,14 @@ fn describe(path: &Path, file: &str, size: u64, total_ram: u64, verified: &Verif
 
 /// "Gemma 3 1b It" style names are ugly; prefer general.name, fall back to the file name.
 pub fn display_name(g: &GgufInfo, file: &str) -> String {
-    let base = g.name.clone().unwrap_or_else(|| file.trim_end_matches(".gguf").replace(['_', '-'], " "));
+    let base = g
+        .name
+        .clone()
+        .unwrap_or_else(|| file.trim_end_matches(".gguf").replace(['_', '-'], " "));
     match &g.size_label {
-        Some(l) if !base.to_ascii_lowercase().contains(&l.to_ascii_lowercase()) => format!("{base} {l}"),
+        Some(l) if !base.to_ascii_lowercase().contains(&l.to_ascii_lowercase()) => {
+            format!("{base} {l}")
+        }
         _ => base,
     }
 }
@@ -112,7 +134,12 @@ pub fn quant_from_name(file: &str) -> Option<String> {
             return Some(up);
         }
         // "model_Q4_K_M" (underscore-joined)
-        if let Some(i) = up.find("_Q").or_else(|| up.find("_IQ")).or_else(|| up.find("_F16")).or_else(|| up.find("_BF16")) {
+        if let Some(i) = up
+            .find("_Q")
+            .or_else(|| up.find("_IQ"))
+            .or_else(|| up.find("_F16"))
+            .or_else(|| up.find("_BF16"))
+        {
             let cand = &up[i + 1..];
             if is_quant(cand) {
                 return Some(cand.to_string());
@@ -125,7 +152,11 @@ pub fn quant_from_name(file: &str) -> Option<String> {
 fn is_quant(s: &str) -> bool {
     matches!(s, "F32" | "F16" | "BF16" | "MXFP4" | "NVFP4")
         || ((s.starts_with('Q') || s.starts_with("IQ") || s.starts_with("TQ"))
-            && s.trim_start_matches(['I', 'T', 'Q']).chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+            && s.trim_start_matches(['I', 'T', 'Q'])
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
             && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
             && s.len() <= 8)
 }
@@ -137,25 +168,40 @@ pub fn unique_dest(dir: &Path, file: &str) -> PathBuf {
         return p;
     }
     let stem = file.trim_end_matches(".gguf");
-    (2..).map(|i| dir.join(format!("{stem}-{i}.gguf"))).find(|p| !p.exists()).unwrap()
+    (2..)
+        .map(|i| dir.join(format!("{stem}-{i}.gguf")))
+        .find(|p| !p.exists())
+        .unwrap()
 }
 
 /// Copy `src` into `dir` without ever leaving a half-written model behind:
 /// write to `.part`, flush, then rename. Calls `progress(done, total)` as it goes.
 /// Returns the new file name, or the existing one if an identical-size copy is there.
 pub fn import(src: &Path, dir: &Path, mut progress: impl FnMut(u64, u64)) -> Result<String> {
-    let fname = src.file_name().and_then(|n| n.to_str()).unwrap_or("model.gguf").to_string();
-    let safe = crate::paths::safe_model_file_name(&fname).ok_or_else(|| UserError::not_gguf(&fname))?;
+    let fname = src
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("model.gguf")
+        .to_string();
+    let safe =
+        crate::paths::safe_model_file_name(&fname).ok_or_else(|| UserError::not_gguf(&fname))?;
     match gguf::read(src) {
         Ok(_) => {}
         Err(GgufError::NotGguf) => return Err(UserError::not_gguf(&fname)),
         Err(GgufError::Io(e)) => return Err(UserError::import_failed().with_detail(e)),
         Err(e) => return Err(UserError::model_corrupt(&fname).with_detail(e.to_string())),
     }
-    let total = std::fs::metadata(src).map_err(|e| UserError::import_failed().with_detail(e.to_string()))?.len();
-    std::fs::create_dir_all(dir).map_err(|e| UserError::from_io_write(&e, UserError::import_failed()))?;
+    let total = std::fs::metadata(src)
+        .map_err(|e| UserError::import_failed().with_detail(e.to_string()))?
+        .len();
+    std::fs::create_dir_all(dir)
+        .map_err(|e| UserError::from_io_write(&e, UserError::import_failed()))?;
     let existing = dir.join(&safe);
-    if existing.exists() && std::fs::metadata(&existing).map(|m| m.len() == total).unwrap_or(false) {
+    if existing.exists()
+        && std::fs::metadata(&existing)
+            .map(|m| m.len() == total)
+            .unwrap_or(false)
+    {
         progress(total, total);
         return Ok(safe);
     }
@@ -182,7 +228,10 @@ pub fn import(src: &Path, dir: &Path, mut progress: impl FnMut(u64, u64)) -> Res
         }
         out.sync_all()?;
         if done != total {
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "source changed while copying"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "source changed while copying",
+            ));
         }
         Ok(())
     })();
@@ -245,21 +294,35 @@ pub struct VerifiedCache {
 
 impl VerifiedCache {
     pub fn load(path: &Path) -> Self {
-        let mut c: VerifiedCache =
-            std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        let mut c: VerifiedCache = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
         c.path = Some(path.to_path_buf());
         c
     }
 
     fn key(p: &Path) -> Option<(String, u64, u64)> {
         let m = std::fs::metadata(p).ok()?;
-        let mtime = m.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_secs();
-        Some((p.file_name()?.to_string_lossy().into_owned(), m.len(), mtime))
+        let mtime = m
+            .modified()
+            .ok()?
+            .duration_since(UNIX_EPOCH)
+            .ok()?
+            .as_secs();
+        Some((
+            p.file_name()?.to_string_lossy().into_owned(),
+            m.len(),
+            mtime,
+        ))
     }
 
     pub fn get(&self, p: &Path) -> Option<bool> {
         let (name, size, mtime) = Self::key(p)?;
-        self.entries.get(&name).filter(|(s, t, _)| *s == size && *t == mtime).map(|(_, _, ok)| *ok)
+        self.entries
+            .get(&name)
+            .filter(|(s, t, _)| *s == size && *t == mtime)
+            .map(|(_, _, ok)| *ok)
     }
 
     pub fn set(&mut self, p: &Path, ok: bool) {
@@ -281,7 +344,13 @@ impl VerifiedCache {
             .iter()
             .map(|m| dir.join(&m.file))
             .filter(|p| {
-                std::fs::metadata(p).map(|md| Some(md.len()) == pinned_model(&p.file_name().unwrap().to_string_lossy()).map(|m| m.size)).unwrap_or(false)
+                std::fs::metadata(p)
+                    .map(|md| {
+                        Some(md.len())
+                            == pinned_model(&p.file_name().unwrap().to_string_lossy())
+                                .map(|m| m.size)
+                    })
+                    .unwrap_or(false)
                     && self.get(p).is_none()
             })
             .collect()
@@ -318,10 +387,18 @@ mod tests {
     #[test]
     fn scan_lists_models_and_hides_the_rest() {
         let d = tempfile::tempdir().unwrap();
-        std::fs::write(d.path().join("a-Q4_K_M.gguf"), testfile::chat_model("Alpha")).unwrap();
+        std::fs::write(
+            d.path().join("a-Q4_K_M.gguf"),
+            testfile::chat_model("Alpha"),
+        )
+        .unwrap();
         std::fs::write(d.path().join("broken.gguf"), b"GGUFxx").unwrap();
         std::fs::write(d.path().join("mmproj-f16.gguf"), testfile::chat_model("P")).unwrap();
-        std::fs::write(d.path().join("big-00002-of-00002.gguf"), testfile::chat_model("B")).unwrap();
+        std::fs::write(
+            d.path().join("big-00002-of-00002.gguf"),
+            testfile::chat_model("B"),
+        )
+        .unwrap();
         std::fs::write(d.path().join("notes.txt"), b"hi").unwrap();
         std::fs::write(d.path().join("x.gguf.part"), b"GGUF").unwrap();
         let list = scan(d.path(), 4 * GB, &VerifiedCache::default());
@@ -344,8 +421,17 @@ mod tests {
         let name = import(&s, dst.path(), |d, t| last = (d, t)).unwrap();
         assert_eq!(name, "Mod_le_Q4_K_M.gguf");
         assert_eq!(last.0, last.1);
-        assert_eq!(std::fs::read(dst.path().join(&name)).unwrap(), std::fs::read(&s).unwrap());
-        assert!(std::fs::read_dir(dst.path()).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".part")));
+        assert_eq!(
+            std::fs::read(dst.path().join(&name)).unwrap(),
+            std::fs::read(&s).unwrap()
+        );
+        assert!(
+            std::fs::read_dir(dst.path()).unwrap().all(|e| !e
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".part"))
+        );
         // Importing the same file again is a no-op.
         assert_eq!(import(&s, dst.path(), |_, _| {}).unwrap(), name);
         assert_eq!(std::fs::read_dir(dst.path()).unwrap().count(), 1);
@@ -356,10 +442,16 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let s = d.path().join("photo.gguf");
         std::fs::write(&s, b"\x89PNG....").unwrap();
-        assert_eq!(import(&s, d.path(), |_, _| {}).unwrap_err().code, crate::errors::ErrorCode::NotGguf);
+        assert_eq!(
+            import(&s, d.path(), |_, _| {}).unwrap_err().code,
+            crate::errors::ErrorCode::NotGguf
+        );
         let t = d.path().join("notes.txt");
         std::fs::write(&t, b"x").unwrap();
-        assert_eq!(import(&t, d.path(), |_, _| {}).unwrap_err().code, crate::errors::ErrorCode::NotGguf);
+        assert_eq!(
+            import(&t, d.path(), |_, _| {}).unwrap_err().code,
+            crate::errors::ErrorCode::NotGguf
+        );
     }
 
     #[test]
@@ -369,7 +461,10 @@ mod tests {
         let b = testfile::chat_model("M");
         std::fs::write(&s, &b[..b.len() - 100]).unwrap();
         let out = tempfile::tempdir().unwrap();
-        assert_eq!(import(&s, out.path(), |_, _| {}).unwrap_err().code, crate::errors::ErrorCode::ModelCorrupt);
+        assert_eq!(
+            import(&s, out.path(), |_, _| {}).unwrap_err().code,
+            crate::errors::ErrorCode::ModelCorrupt
+        );
     }
 
     #[test]
@@ -390,7 +485,10 @@ mod tests {
         let mut c = VerifiedCache::load(&d.path().join("v.json"));
         assert_eq!(c.get(&f), None);
         c.set(&f, true);
-        assert_eq!(VerifiedCache::load(&d.path().join("v.json")).get(&f), Some(true));
+        assert_eq!(
+            VerifiedCache::load(&d.path().join("v.json")).get(&f),
+            Some(true)
+        );
         std::fs::write(&f, b"three").unwrap();
         assert_eq!(c.get(&f), None);
     }
@@ -400,6 +498,9 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("x");
         std::fs::write(&f, b"abc").unwrap();
-        assert_eq!(sha256_file(&f, |_| {}).unwrap(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(
+            sha256_file(&f, |_| {}).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 }

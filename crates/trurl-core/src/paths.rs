@@ -18,12 +18,19 @@ pub struct Paths {
 impl Paths {
     pub fn from_env() -> Self {
         if let Some(h) = std::env::var_os("TRURL_HOME").filter(|v| !v.is_empty()) {
-            return Self { home: PathBuf::from(h) };
+            return Self {
+                home: PathBuf::from(h),
+            };
         }
         #[cfg(windows)]
-        let home = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from(".")).join("CyberiadLabs").join("Trurl");
+        let home = dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("CyberiadLabs")
+            .join("Trurl");
         #[cfg(not(windows))]
-        let home = dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("trurl");
+        let home = dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("trurl");
         Self { home }
     }
 
@@ -75,11 +82,17 @@ pub fn llama_root() -> Option<PathBuf> {
     for anc in dir.ancestors().take(5) {
         candidates.push(anc.join("vendor").join("llama").join(std::env::consts::OS));
     }
-    candidates.into_iter().find(|c| c.join("compat").is_dir() || c.join("avx2").is_dir())
+    candidates
+        .into_iter()
+        .find(|c| c.join("compat").is_dir() || c.join("avx2").is_dir())
 }
 
 pub fn server_exe_name() -> &'static str {
-    if cfg!(windows) { "llama-server.exe" } else { "llama-server" }
+    if cfg!(windows) {
+        "llama-server.exe"
+    } else {
+        "llama-server"
+    }
 }
 
 /// A file name that is safe on every OS: no separators, no `..`, no reserved
@@ -87,10 +100,18 @@ pub fn server_exe_name() -> &'static str {
 /// tools still mishandle non-ASCII paths). Keeps the `.gguf` extension.
 pub fn safe_model_file_name(original: &str) -> Option<String> {
     let base = original.rsplit(['/', '\\']).next()?.trim();
-    let stem = base.strip_suffix(".gguf").or_else(|| base.strip_suffix(".GGUF"))?;
+    let stem = base
+        .strip_suffix(".gguf")
+        .or_else(|| base.strip_suffix(".GGUF"))?;
     let mut out: String = stem
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+') { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+') {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     while out.contains("..") {
         out = out.replace("..", ".");
@@ -105,8 +126,14 @@ pub fn safe_model_file_name(original: &str) -> Option<String> {
     let upper = out.to_ascii_uppercase();
     let reserved = ["CON", "PRN", "AUX", "NUL"];
     let is_reserved = reserved.contains(&upper.as_str())
-        || ((upper.starts_with("COM") || upper.starts_with("LPT")) && upper.len() == 4 && upper.as_bytes()[3].is_ascii_digit());
-    let out = if is_reserved { format!("{out}_model") } else { out };
+        || ((upper.starts_with("COM") || upper.starts_with("LPT"))
+            && upper.len() == 4
+            && upper.as_bytes()[3].is_ascii_digit());
+    let out = if is_reserved {
+        format!("{out}_model")
+    } else {
+        out
+    };
     let out: String = out.chars().take(150).collect();
     Some(format!("{out}.gguf"))
 }
@@ -114,7 +141,9 @@ pub fn safe_model_file_name(original: &str) -> Option<String> {
 /// True when `p` sits directly inside `dir` (no traversal).
 pub fn is_direct_child(dir: &Path, p: &Path) -> bool {
     p.parent().map(|parent| parent == dir).unwrap_or(false)
-        && p.file_name().map(|n| n != ".." && n != ".").unwrap_or(false)
+        && p.file_name()
+            .map(|n| n != ".." && n != ".")
+            .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -130,13 +159,34 @@ mod tests {
 
     #[test]
     fn safe_names() {
-        assert_eq!(safe_model_file_name("gemma-3-1b-it-Q4_K_M.gguf").as_deref(), Some("gemma-3-1b-it-Q4_K_M.gguf"));
-        assert_eq!(safe_model_file_name("sub/dir/Model.gguf").as_deref(), Some("Model.gguf"));
-        assert_eq!(safe_model_file_name("..\\..\\evil.gguf").as_deref(), Some("evil.gguf"));
-        assert_eq!(safe_model_file_name("Modèle façon été.gguf").as_deref(), Some("Mod_le_fa_on_t.gguf"));
-        assert_eq!(safe_model_file_name("CON.gguf").as_deref(), Some("CON_model.gguf"));
-        assert_eq!(safe_model_file_name("com1.gguf").as_deref(), Some("com1_model.gguf"));
-        assert_eq!(safe_model_file_name("a..b.gguf").as_deref(), Some("a.b.gguf"));
+        assert_eq!(
+            safe_model_file_name("gemma-3-1b-it-Q4_K_M.gguf").as_deref(),
+            Some("gemma-3-1b-it-Q4_K_M.gguf")
+        );
+        assert_eq!(
+            safe_model_file_name("sub/dir/Model.gguf").as_deref(),
+            Some("Model.gguf")
+        );
+        assert_eq!(
+            safe_model_file_name("..\\..\\evil.gguf").as_deref(),
+            Some("evil.gguf")
+        );
+        assert_eq!(
+            safe_model_file_name("Modèle façon été.gguf").as_deref(),
+            Some("Mod_le_fa_on_t.gguf")
+        );
+        assert_eq!(
+            safe_model_file_name("CON.gguf").as_deref(),
+            Some("CON_model.gguf")
+        );
+        assert_eq!(
+            safe_model_file_name("com1.gguf").as_deref(),
+            Some("com1_model.gguf")
+        );
+        assert_eq!(
+            safe_model_file_name("a..b.gguf").as_deref(),
+            Some("a.b.gguf")
+        );
         assert_eq!(safe_model_file_name("notes.txt"), None);
         assert_eq!(safe_model_file_name("...gguf"), None);
         assert_eq!(safe_model_file_name("X.GGUF").as_deref(), Some("X.gguf"));

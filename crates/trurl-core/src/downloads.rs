@@ -77,7 +77,9 @@ pub fn resolve_url(base: &str, repo: &str, revision: &str, file: &str) -> String
             .map(|seg| {
                 seg.bytes()
                     .map(|b| match b {
-                        b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+                        b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                            (b as char).to_string()
+                        }
                         _ => format!("%{b:02X}"),
                     })
                     .collect::<String>()
@@ -85,7 +87,13 @@ pub fn resolve_url(base: &str, repo: &str, revision: &str, file: &str) -> String
             .collect::<Vec<_>>()
             .join("/")
     };
-    format!("{}/{}/resolve/{}/{}", base.trim_end_matches('/'), enc(repo), enc(revision), enc(file))
+    format!(
+        "{}/{}/resolve/{}/{}",
+        base.trim_end_matches('/'),
+        enc(repo),
+        enc(revision),
+        enc(file)
+    )
 }
 
 type Notify = Arc<dyn Fn(Vec<DownloadInfo>) + Send + Sync>;
@@ -148,7 +156,12 @@ impl Downloads {
     #[doc(hidden)]
     pub fn with_retry_delays(self, delays: Vec<Duration>) -> Self {
         let inner = Arc::into_inner(self.inner).expect("set retry delays before sharing");
-        Downloads { inner: Arc::new(Inner { retry_delays: delays, ..inner }) }
+        Downloads {
+            inner: Arc::new(Inner {
+                retry_delays: delays,
+                ..inner
+            }),
+        }
     }
 
     pub fn set_token(&self, token: &str) {
@@ -157,17 +170,24 @@ impl Downloads {
 
     /// Jobs left from a previous run come back paused, with their bytes.
     fn restore(&self) {
-        let Ok(rd) = std::fs::read_dir(&self.inner.dir) else { return };
+        let Ok(rd) = std::fs::read_dir(&self.inner.dir) else {
+            return;
+        };
         let mut map = self.inner.entries.lock().unwrap();
         for e in rd.flatten() {
             let p = e.path();
             if p.extension().and_then(|x| x.to_str()) != Some("json") {
                 continue;
             }
-            let Some(mut info) = std::fs::read_to_string(&p).ok().and_then(|t| serde_json::from_str::<DownloadInfo>(&t).ok()) else {
+            let Some(mut info) = std::fs::read_to_string(&p)
+                .ok()
+                .and_then(|t| serde_json::from_str::<DownloadInfo>(&t).ok())
+            else {
                 continue;
             };
-            info.done = std::fs::metadata(self.part_path(&info.id)).map(|m| m.len()).unwrap_or(0);
+            info.done = std::fs::metadata(self.part_path(&info.id))
+                .map(|m| m.len())
+                .unwrap_or(0);
             info.rate = 0;
             if info.status != DownloadStatus::Failed {
                 info.status = DownloadStatus::Paused;
@@ -202,16 +222,21 @@ impl Downloads {
             e.info.clone()
         };
         if snapshot.status != DownloadStatus::Done {
-            let _ = std::fs::write(self.job_path(id), serde_json::to_vec(&snapshot).unwrap_or_default());
+            let _ = std::fs::write(
+                self.job_path(id),
+                serde_json::to_vec(&snapshot).unwrap_or_default(),
+            );
         }
     }
 
     /// Start (or resume) a download. Returns its id.
     pub fn start(&self, req: DownloadRequest) -> Result<String, UserError> {
         let base_name = req.file.rsplit('/').next().unwrap_or(&req.file);
-        let dest_file = crate::paths::safe_model_file_name(base_name).ok_or_else(|| UserError::not_gguf(base_name))?;
+        let dest_file = crate::paths::safe_model_file_name(base_name)
+            .ok_or_else(|| UserError::not_gguf(base_name))?;
         let id = download_id(&req.repo, &req.file, &req.revision);
-        std::fs::create_dir_all(&self.inner.dir).map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
+        std::fs::create_dir_all(&self.inner.dir)
+            .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
         {
             let mut map = self.inner.entries.lock().unwrap();
             if let Some(e) = map.get(&id) {
@@ -219,7 +244,9 @@ impl Downloads {
                     return Ok(id); // already running
                 }
             }
-            let done = std::fs::metadata(self.part_path(&id)).map(|m| m.len()).unwrap_or(0);
+            let done = std::fs::metadata(self.part_path(&id))
+                .map(|m| m.len())
+                .unwrap_or(0);
             let info = DownloadInfo {
                 id: id.clone(),
                 repo: req.repo,
@@ -243,7 +270,9 @@ impl Downloads {
         let token = CancellationToken::new();
         let info = {
             let mut map = self.inner.entries.lock().unwrap();
-            let Some(e) = map.get_mut(id) else { return Ok(()) };
+            let Some(e) = map.get_mut(id) else {
+                return Ok(());
+            };
             if e.cancel.is_some() {
                 return Ok(());
             }
@@ -259,7 +288,10 @@ impl Downloads {
                 return Err(UserError::disk_full());
             }
         }
-        let _ = std::fs::write(self.job_path(id), serde_json::to_vec(&info).unwrap_or_default());
+        let _ = std::fs::write(
+            self.job_path(id),
+            serde_json::to_vec(&info).unwrap_or_default(),
+        );
         self.emit();
         let me = self.clone();
         let id = id.to_string();
@@ -299,7 +331,14 @@ impl Downloads {
     pub fn pause_all(&self) {
         let ids: Vec<String> = self.inner.entries.lock().unwrap().keys().cloned().collect();
         for id in ids {
-            let running = self.inner.entries.lock().unwrap().get(&id).map(|e| e.cancel.is_some()).unwrap_or(false);
+            let running = self
+                .inner
+                .entries
+                .lock()
+                .unwrap()
+                .get(&id)
+                .map(|e| e.cancel.is_some())
+                .unwrap_or(false);
             if running {
                 self.pause(&id);
             }
@@ -322,7 +361,12 @@ impl Downloads {
     }
 
     fn info(&self, id: &str) -> Option<DownloadInfo> {
-        self.inner.entries.lock().unwrap().get(id).map(|e| e.info.clone())
+        self.inner
+            .entries
+            .lock()
+            .unwrap()
+            .get(id)
+            .map(|e| e.info.clone())
     }
 
     async fn run(&self, id: String, cancel: CancellationToken) {
@@ -334,7 +378,10 @@ impl Downloads {
             }
             match r {
                 Ok(()) => break,
-                Err(e) if e.code == ErrorCode::DownloadFailed && attempt < self.inner.retry_delays.len() => {
+                Err(e)
+                    if e.code == ErrorCode::DownloadFailed
+                        && attempt < self.inner.retry_delays.len() =>
+                {
                     let delay = self.inner.retry_delays[attempt];
                     attempt += 1;
                     self.update(&id, |i| {
@@ -364,7 +411,9 @@ impl Downloads {
         let Some(info) = self.info(&id) else { return };
         let part = self.part_path(&id);
         let models_dir = self.inner.models_dir.clone();
-        let verified = tokio::task::spawn_blocking(move || verify_and_install(&part, &info, &models_dir)).await;
+        let verified =
+            tokio::task::spawn_blocking(move || verify_and_install(&part, &info, &models_dir))
+                .await;
         match verified {
             Ok(Ok(name)) => {
                 let _ = std::fs::remove_file(self.job_path(&id));
@@ -388,11 +437,14 @@ impl Downloads {
 
     /// One HTTP attempt: append to the part file until complete or the connection drops.
     async fn fetch(&self, id: &str, cancel: &CancellationToken) -> Result<(), UserError> {
-        let Some(info) = self.info(id) else { return Ok(()) };
+        let Some(info) = self.info(id) else {
+            return Ok(());
+        };
         let part = self.part_path(id);
         let mut have = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
         if info.size > 0 && have > info.size {
-            std::fs::write(&part, b"").map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
+            std::fs::write(&part, b"")
+                .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
             have = 0;
         }
         if info.size > 0 && have == info.size {
@@ -416,14 +468,21 @@ impl Downloads {
         let status = resp.status().as_u16();
         let start: u64 = match status {
             206 => {
-                let cr = resp.headers().get(reqwest::header::CONTENT_RANGE).and_then(|v| v.to_str().ok()).unwrap_or("");
+                let cr = resp
+                    .headers()
+                    .get(reqwest::header::CONTENT_RANGE)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("");
                 match content_range_start(cr) {
                     // The server may start earlier than asked: write from where it says.
                     Some(s) if s <= have => s,
                     // Later than asked, or unreadable: we would leave a hole. Start over.
                     _ => {
-                        std::fs::write(&part, b"").map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
-                        return Err(UserError::download_failed().with_detail(format!("unexpected Content-Range {cr:?}")));
+                        std::fs::write(&part, b"").map_err(|e| {
+                            UserError::from_io_write(&e, UserError::download_failed())
+                        })?;
+                        return Err(UserError::download_failed()
+                            .with_detail(format!("unexpected Content-Range {cr:?}")));
                     }
                 }
             }
@@ -432,10 +491,13 @@ impl Downloads {
                 if info.size > 0 && have >= info.size {
                     return Ok(());
                 }
-                std::fs::write(&part, b"").map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
+                std::fs::write(&part, b"")
+                    .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
                 return Err(UserError::download_failed().with_detail("416 on resume; restarting"));
             }
-            401 | 403 => return Err(UserError::hub_gated(&info.repo).with_detail(format!("HTTP {status}"))),
+            401 | 403 => {
+                return Err(UserError::hub_gated(&info.repo).with_detail(format!("HTTP {status}")));
+            }
             404 => return Err(UserError::hub_failed().with_detail(format!("HTTP 404 for {url}"))),
             _ => return Err(UserError::download_failed().with_detail(format!("HTTP {status}"))),
         };
@@ -445,8 +507,10 @@ impl Downloads {
             .truncate(false)
             .open(&part)
             .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
-        f.set_len(start).map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
-        f.seek(SeekFrom::Start(start)).map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
+        f.set_len(start)
+            .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
+        f.seek(SeekFrom::Start(start))
+            .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
         let mut done = start;
         self.update(id, |i| i.done = done);
         let mut stream = resp.bytes_stream();
@@ -463,7 +527,8 @@ impl Downloads {
             };
             match next {
                 Some(Ok(chunk)) => {
-                    f.write_all(&chunk).map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
+                    f.write_all(&chunk)
+                        .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
                     done += chunk.len() as u64;
                     window_bytes += chunk.len() as u64;
                     if last_emit.elapsed() >= Duration::from_millis(300) {
@@ -489,7 +554,8 @@ impl Downloads {
                 None => break,
             }
         }
-        f.sync_all().map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
+        f.sync_all()
+            .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
         self.update(id, |i| {
             i.done = done;
             if i.size == 0 {
@@ -497,7 +563,8 @@ impl Downloads {
             }
         });
         if info.size > 0 && done < info.size {
-            return Err(UserError::download_failed().with_detail(format!("connection closed at {done} of {}", info.size)));
+            return Err(UserError::download_failed()
+                .with_detail(format!("connection closed at {done} of {}", info.size)));
         }
         Ok(())
     }
@@ -511,21 +578,29 @@ pub fn content_range_start(v: &str) -> Option<u64> {
     s.trim().parse().ok()
 }
 
-fn verify_and_install(part: &Path, info: &DownloadInfo, models_dir: &Path) -> Result<String, UserError> {
+fn verify_and_install(
+    part: &Path,
+    info: &DownloadInfo,
+    models_dir: &Path,
+) -> Result<String, UserError> {
     if let Some(expected) = &info.sha256 {
-        let got = crate::models::sha256_file(part, |_| {}).map_err(|e| UserError::download_failed().with_detail(e.to_string()))?;
+        let got = crate::models::sha256_file(part, |_| {})
+            .map_err(|e| UserError::download_failed().with_detail(e.to_string()))?;
         if &got != expected {
-            return Err(UserError::download_corrupt(&info.dest_file).with_detail(format!("sha256 {got} != {expected}")));
+            return Err(UserError::download_corrupt(&info.dest_file)
+                .with_detail(format!("sha256 {got} != {expected}")));
         }
     }
     if let Err(e) = crate::gguf::read(part) {
         return Err(UserError::download_corrupt(&info.dest_file).with_detail(e.to_string()));
     }
-    std::fs::create_dir_all(models_dir).map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
+    std::fs::create_dir_all(models_dir)
+        .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
     let dest = crate::models::unique_dest(models_dir, &info.dest_file);
     if std::fs::rename(part, &dest).is_err() {
         // Different volume (TRURL_HOME split): copy then remove.
-        std::fs::copy(part, &dest).map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
+        std::fs::copy(part, &dest)
+            .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
         let _ = std::fs::remove_file(part);
     }
     Ok(dest.file_name().unwrap().to_string_lossy().into_owned())
@@ -538,7 +613,12 @@ mod tests {
     #[test]
     fn urls_are_encoded_per_segment() {
         assert_eq!(
-            resolve_url("https://huggingface.co/", "ggml-org/gemma-3-1b-it-GGUF", "abc123", "sub dir/m+1.gguf"),
+            resolve_url(
+                "https://huggingface.co/",
+                "ggml-org/gemma-3-1b-it-GGUF",
+                "abc123",
+                "sub dir/m+1.gguf"
+            ),
             "https://huggingface.co/ggml-org/gemma-3-1b-it-GGUF/resolve/abc123/sub%20dir/m%2B1.gguf"
         );
     }
@@ -553,7 +633,13 @@ mod tests {
 
     #[test]
     fn ids_are_stable_and_distinct() {
-        assert_eq!(download_id("a/b", "f.gguf", "r"), download_id("a/b", "f.gguf", "r"));
-        assert_ne!(download_id("a/b", "f.gguf", "r"), download_id("a/b", "f.gguf", "s"));
+        assert_eq!(
+            download_id("a/b", "f.gguf", "r"),
+            download_id("a/b", "f.gguf", "r")
+        );
+        assert_ne!(
+            download_id("a/b", "f.gguf", "r"),
+            download_id("a/b", "f.gguf", "s")
+        );
     }
 }

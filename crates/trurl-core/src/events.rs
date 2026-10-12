@@ -14,9 +14,20 @@ use serde::Serialize;
 pub enum EngineState {
     /// No model selected (empty models folder, or the loaded one was deleted).
     Idle,
-    Loading { file: String, name: String },
-    Ready { file: String, name: String, context: u32 },
-    Failed { file: String, name: String, error: UserError },
+    Loading {
+        file: String,
+        name: String,
+    },
+    Ready {
+        file: String,
+        name: String,
+        context: u32,
+    },
+    Failed {
+        file: String,
+        name: String,
+        error: UserError,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -66,11 +77,21 @@ pub struct LoadWarning {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
-    Snapshot { snapshot: Box<Snapshot> },
-    Engine { engine: EngineState },
-    Models { models: Vec<ModelInfo> },
-    Settings { settings: PublicSettings },
-    TurnStarted { turn: Turn },
+    Snapshot {
+        snapshot: Box<Snapshot>,
+    },
+    Engine {
+        engine: EngineState,
+    },
+    Models {
+        models: Vec<ModelInfo>,
+    },
+    Settings {
+        settings: PublicSettings,
+    },
+    TurnStarted {
+        turn: Turn,
+    },
     /// Text to append. `reasoning_from_answer`: move the answer so far into the reasoning block first.
     TurnDelta {
         id: u64,
@@ -82,15 +103,37 @@ pub enum Event {
         reasoning_from_answer: bool,
     },
     /// The first answer token arrived after `ms` of reasoning: collapse the block.
-    TurnThought { id: u64, ms: u64 },
-    TurnFinished { turn: Turn },
+    TurnThought {
+        id: u64,
+        ms: u64,
+    },
+    TurnFinished {
+        turn: Turn,
+    },
     ChatCleared,
-    Generating { generating: bool },
-    ImportProgress { file: String, done: u64, total: u64 },
-    ImportFinished { file: Option<String>, error: Option<UserError> },
+    Generating {
+        generating: bool,
+    },
+    ImportProgress {
+        file: String,
+        done: u64,
+        total: u64,
+    },
+    ImportFinished {
+        file: Option<String>,
+        error: Option<UserError>,
+    },
     /// Checking a bundled model's SHA-256 against pins.json.
-    VerifyProgress { file: String, done: u64, total: u64 },
-    Downloads { downloads: Vec<DownloadInfo> },
+    VerifyProgress {
+        file: String,
+        done: u64,
+        total: u64,
+    },
+    Downloads {
+        downloads: Vec<DownloadInfo>,
+    },
     /// Something failed outside a chat turn (delete, import, download…).
-    Notice { error: UserError },
+    Notice {
+        error: UserError,
+    },
 }

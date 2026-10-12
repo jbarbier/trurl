@@ -40,9 +40,17 @@ struct Srv {
 
 async fn serve(State(s): State<Arc<Srv>>, headers: HeaderMap) -> Response {
     let n = s.requests.fetch_add(1, Ordering::SeqCst);
-    let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok()).map(str::to_string);
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
     s.ranges.lock().unwrap().push(range.clone());
-    if s.mode == Mode::NeedToken && headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()) != Some("Bearer hf_secret") {
+    if s.mode == Mode::NeedToken
+        && headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            != Some("Bearer hf_secret")
+    {
         return Response::builder().status(401).body(Body::empty()).unwrap();
     }
     let total = s.data.len();
@@ -55,7 +63,11 @@ async fn serve(State(s): State<Arc<Srv>>, headers: HeaderMap) -> Response {
     if s.mode == Mode::Corrupt {
         data[total / 2] ^= 0xFF;
     }
-    let mut status = if start > 0 { StatusCode::PARTIAL_CONTENT } else { StatusCode::OK };
+    let mut status = if start > 0 {
+        StatusCode::PARTIAL_CONTENT
+    } else {
+        StatusCode::OK
+    };
     if s.mode == Mode::IgnoreRange {
         start = 0;
         status = StatusCode::OK;
@@ -68,9 +80,14 @@ async fn serve(State(s): State<Arc<Srv>>, headers: HeaderMap) -> Response {
         range_start = start / 2;
     }
     let body_bytes = data[range_start..].to_vec();
-    let mut b = Response::builder().status(status).header(header::CONTENT_LENGTH, body_bytes.len());
+    let mut b = Response::builder()
+        .status(status)
+        .header(header::CONTENT_LENGTH, body_bytes.len());
     if status == StatusCode::PARTIAL_CONTENT {
-        b = b.header(header::CONTENT_RANGE, format!("bytes {}-{}/{}", range_start, total - 1, total));
+        b = b.header(
+            header::CONTENT_RANGE,
+            format!("bytes {}-{}/{}", range_start, total - 1, total),
+        );
     }
     let drop_rule = match s.mode {
         Mode::DropAfter(cut, times) => Some((cut, times)),
@@ -82,7 +99,10 @@ async fn serve(State(s): State<Arc<Srv>>, headers: HeaderMap) -> Response {
             let first = Bytes::from(body_bytes[..cut.min(body_bytes.len())].to_vec());
             let stream = futures_util::stream::iter(vec![
                 Ok::<Bytes, std::io::Error>(first),
-                Err(std::io::Error::new(std::io::ErrorKind::ConnectionReset, "wifi dropped")),
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionReset,
+                    "wifi dropped",
+                )),
             ]);
             return b.body(Body::from_stream(stream)).unwrap();
         }
@@ -110,8 +130,15 @@ fn model_bytes() -> Vec<u8> {
 async fn setup(mode: Mode) -> Setup {
     let data = model_bytes();
     let sha = hex::encode(Sha256::digest(&data));
-    let srv = Arc::new(Srv { data: data.clone(), mode, requests: AtomicUsize::new(0), ranges: Mutex::new(vec![]) });
-    let app = Router::new().route("/{owner}/{repo}/resolve/{rev}/{*file}", get(serve)).with_state(srv.clone());
+    let srv = Arc::new(Srv {
+        data: data.clone(),
+        mode,
+        requests: AtomicUsize::new(0),
+        ranges: Mutex::new(vec![]),
+    });
+    let app = Router::new()
+        .route("/{owner}/{repo}/resolve/{rev}/{*file}", get(serve))
+        .with_state(srv.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -124,7 +151,10 @@ async fn setup(mode: Mode) -> Setup {
         dl_dir.path().into(),
         models.path().into(),
         format!("http://{addr}"),
-        reqwest::Client::builder().read_timeout(Duration::from_secs(5)).build().unwrap(),
+        trurl_core::net::client_builder()
+            .read_timeout(Duration::from_secs(5))
+            .build()
+            .unwrap(),
         Arc::new(move |l| s2.lock().unwrap().extend(l)),
         Arc::new(move |f| d2.lock().unwrap().push(f)),
     )
@@ -136,7 +166,15 @@ async fn setup(mode: Mode) -> Setup {
         size: data.len() as u64,
         sha256: Some(sha),
     };
-    Setup { downloads, srv, models, dl_dir, seen, done, req }
+    Setup {
+        downloads,
+        srv,
+        models,
+        dl_dir,
+        seen,
+        done,
+        req,
+    }
 }
 
 async fn wait_done(s: &Setup) -> Result<String, DownloadInfo> {
@@ -144,19 +182,34 @@ async fn wait_done(s: &Setup) -> Result<String, DownloadInfo> {
         if let Some(f) = s.done.lock().unwrap().first().cloned() {
             return Ok(f);
         }
-        if let Some(fail) = s.downloads.list().into_iter().find(|d| d.status == DownloadStatus::Failed) {
+        if let Some(fail) = s
+            .downloads
+            .list()
+            .into_iter()
+            .find(|d| d.status == DownloadStatus::Failed)
+        {
             return Err(fail);
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    panic!("download neither finished nor failed; list: {:?}", s.downloads.list());
+    panic!(
+        "download neither finished nor failed; list: {:?}",
+        s.downloads.list()
+    );
 }
 
 fn assert_installed(s: &Setup, name: &str) {
     let got = std::fs::read(s.models.path().join(name)).unwrap();
     assert_eq!(got, s.srv.data, "installed file differs");
-    let leftovers: Vec<_> = std::fs::read_dir(s.dl_dir.path()).unwrap().flatten().map(|e| e.file_name()).collect();
-    assert!(leftovers.is_empty(), "download folder should be empty, has {leftovers:?}");
+    let leftovers: Vec<_> = std::fs::read_dir(s.dl_dir.path())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "download folder should be empty, has {leftovers:?}"
+    );
 }
 
 #[tokio::test]
@@ -166,7 +219,13 @@ async fn clean_download_is_verified_and_installed() {
     let name = wait_done(&s).await.unwrap();
     assert_eq!(name, "tiny-Q4_K_M.gguf");
     assert_installed(&s, &name);
-    assert!(s.seen.lock().unwrap().iter().any(|d| d.status == DownloadStatus::Verifying));
+    assert!(
+        s.seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|d| d.status == DownloadStatus::Verifying)
+    );
 }
 
 #[tokio::test]
@@ -179,13 +238,26 @@ async fn dropped_connections_resume_with_range() {
     assert_eq!(ranges[0], None);
     assert_eq!(ranges[1].as_deref(), Some("bytes=700000-"));
     assert_eq!(ranges[2].as_deref(), Some("bytes=1400000-"));
-    assert!(s.seen.lock().unwrap().iter().any(|d| d.status == DownloadStatus::Retrying));
+    assert!(
+        s.seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|d| d.status == DownloadStatus::Retrying)
+    );
 }
 
 #[tokio::test]
 async fn server_ignoring_range_restarts_cleanly() {
     let s = setup(Mode::IgnoreRange).await;
-    std::fs::write(s.dl_dir.path().join(format!("{}.part", trurl_core::downloads::download_id(&s.req.repo, &s.req.file, &s.req.revision))), b"GGUFpartial-garbage").unwrap();
+    std::fs::write(
+        s.dl_dir.path().join(format!(
+            "{}.part",
+            trurl_core::downloads::download_id(&s.req.repo, &s.req.file, &s.req.revision)
+        )),
+        b"GGUFpartial-garbage",
+    )
+    .unwrap();
     s.downloads.start(s.req.clone()).unwrap();
     let name = wait_done(&s).await.unwrap();
     assert_installed(&s, &name);
@@ -197,7 +269,10 @@ async fn wrong_content_range_is_not_appended() {
     s.downloads.start(s.req.clone()).unwrap();
     let name = wait_done(&s).await.unwrap();
     assert_installed(&s, &name);
-    assert_eq!(s.srv.ranges.lock().unwrap()[1].as_deref(), Some("bytes=700000-"));
+    assert_eq!(
+        s.srv.ranges.lock().unwrap()[1].as_deref(),
+        Some("bytes=700000-")
+    );
 }
 
 #[tokio::test]
@@ -219,7 +294,7 @@ async fn pause_keeps_bytes_and_restart_restores_paused() {
         s.dl_dir.path().into(),
         s.models.path().into(),
         "http://127.0.0.1:9".into(),
-        reqwest::Client::new(),
+        trurl_core::net::client_builder().build().unwrap(),
         Arc::new(|_| {}),
         Arc::new(|_| {}),
     );
@@ -247,7 +322,11 @@ async fn corrupted_file_is_rejected_and_removed() {
     s.downloads.start(s.req.clone()).unwrap();
     let fail = wait_done(&s).await.unwrap_err();
     assert_eq!(fail.error.unwrap().code, ErrorCode::DownloadCorrupt);
-    assert_eq!(std::fs::read_dir(s.models.path()).unwrap().count(), 0, "nothing reaches the models folder");
+    assert_eq!(
+        std::fs::read_dir(s.models.path()).unwrap().count(),
+        0,
+        "nothing reaches the models folder"
+    );
 }
 
 #[tokio::test]

@@ -83,9 +83,14 @@ pub fn classify_exit(log: &str, code: Option<i32>) -> ExitKind {
         return ExitKind::IllegalInstruction;
     }
     let l = log.to_ascii_lowercase();
-    if l.contains("couldn't bind") || l.contains("address already in use") || l.contains("only one usage of each socket") {
+    if l.contains("couldn't bind")
+        || l.contains("address already in use")
+        || l.contains("only one usage of each socket")
+    {
         ExitKind::PortInUse
-    } else if l.contains("unknown model architecture") || l.contains("unsupported model architecture") {
+    } else if l.contains("unknown model architecture")
+        || l.contains("unsupported model architecture")
+    {
         ExitKind::Unsupported
     } else if l.contains("failed to allocate")
         || l.contains("unable to allocate")
@@ -185,9 +190,22 @@ impl Server {
             }
             cmd.env("LD_LIBRARY_PATH", ld);
         }
-        let mut child = platform::spawn(cmd).map_err(|e| UserError::server_start().with_detail(e.to_string()))?;
+        let mut child = platform::spawn(cmd)
+            .map_err(|e| UserError::server_start().with_detail(e.to_string()))?;
         let log = LogRing::default();
-        for stream in [child.stdout.take().map(|s| Box::new(s) as Box<dyn std::io::Read + Send>), child.stderr.take().map(|s| Box::new(s) as Box<dyn std::io::Read + Send>)].into_iter().flatten() {
+        for stream in [
+            child
+                .stdout
+                .take()
+                .map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
+            child
+                .stderr
+                .take()
+                .map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
+        ]
+        .into_iter()
+        .flatten()
+        {
             let log = log.clone();
             std::thread::spawn(move || {
                 for line in BufReader::new(stream).lines() {
@@ -198,7 +216,13 @@ impl Server {
                 }
             });
         }
-        Ok(Server { child, port, api_key, config: cfg.clone(), log })
+        Ok(Server {
+            child,
+            port,
+            api_key,
+            config: cfg.clone(),
+            log,
+        })
     }
 
     /// Exit code if the process has ended.
@@ -212,7 +236,11 @@ impl Server {
 
     /// Poll `/health` until the model is loaded. No time limit: a 4B model on a
     /// slow disk can take minutes. Returns the exit kind if the process died.
-    pub async fn wait_ready(&mut self, http: &reqwest::Client, cancel: &tokio_util::sync::CancellationToken) -> Result<(), ExitKind> {
+    pub async fn wait_ready(
+        &mut self,
+        http: &reqwest::Client,
+        cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<(), ExitKind> {
         let url = format!("{}/health", self.base_url());
         loop {
             if cancel.is_cancelled() {
@@ -376,8 +404,13 @@ mod platform {
 
     pub fn spawn(cmd: Command) -> std::io::Result<Child> {
         let (tx, rx) = mpsc::channel();
-        keeper().lock().unwrap().send((cmd, tx)).map_err(|_| std::io::Error::other("spawner gone"))?;
-        rx.recv().map_err(|_| std::io::Error::other("spawner gone"))?
+        keeper()
+            .lock()
+            .unwrap()
+            .send((cmd, tx))
+            .map_err(|_| std::io::Error::other("spawner gone"))?;
+        rx.recv()
+            .map_err(|_| std::io::Error::other("spawner gone"))?
     }
 }
 
@@ -403,13 +436,46 @@ mod tests {
 
     #[test]
     fn classifies_real_failures() {
-        assert_eq!(classify_exit("", Some(0xC000001Du32 as i32)), ExitKind::IllegalInstruction);
+        assert_eq!(
+            classify_exit("", Some(0xC000001Du32 as i32)),
+            ExitKind::IllegalInstruction
+        );
         assert_eq!(classify_exit("", Some(-4)), ExitKind::IllegalInstruction);
-        assert_eq!(classify_exit("error: couldn't bind HTTP server socket, hostname: 127.0.0.1, port: 5", Some(1)), ExitKind::PortInUse);
-        assert_eq!(classify_exit("llama_model_load: error loading model: error loading model architecture: unknown model architecture: 'foo'", Some(1)), ExitKind::Unsupported);
-        assert_eq!(classify_exit("ggml_backend_cpu_buffer_type_alloc_buffer: failed to allocate buffer of size 4294967296", Some(1)), ExitKind::TooBig);
-        assert_eq!(classify_exit("gguf_init_from_file_impl: invalid magic characters: 'PK'", Some(1)), ExitKind::Corrupt);
-        assert_eq!(classify_exit("tensor 'blk.3.ffn' data is not within the file bounds, model is corrupted or incomplete", Some(1)), ExitKind::Corrupt);
+        assert_eq!(
+            classify_exit(
+                "error: couldn't bind HTTP server socket, hostname: 127.0.0.1, port: 5",
+                Some(1)
+            ),
+            ExitKind::PortInUse
+        );
+        assert_eq!(
+            classify_exit(
+                "llama_model_load: error loading model: error loading model architecture: unknown model architecture: 'foo'",
+                Some(1)
+            ),
+            ExitKind::Unsupported
+        );
+        assert_eq!(
+            classify_exit(
+                "ggml_backend_cpu_buffer_type_alloc_buffer: failed to allocate buffer of size 4294967296",
+                Some(1)
+            ),
+            ExitKind::TooBig
+        );
+        assert_eq!(
+            classify_exit(
+                "gguf_init_from_file_impl: invalid magic characters: 'PK'",
+                Some(1)
+            ),
+            ExitKind::Corrupt
+        );
+        assert_eq!(
+            classify_exit(
+                "tensor 'blk.3.ffn' data is not within the file bounds, model is corrupted or incomplete",
+                Some(1)
+            ),
+            ExitKind::Corrupt
+        );
         assert_eq!(classify_exit("something odd", Some(1)), ExitKind::Other);
     }
 
@@ -426,8 +492,16 @@ mod tests {
     #[test]
     fn missing_binary_is_a_plain_error() {
         let d = tempfile::tempdir().unwrap();
-        let c = ServerConfig { models_dir: d.path().into(), model_file: "x.gguf".into(), context: 256, threads: 1, variant: CpuVariant::Compat };
-        let Err(e) = Server::spawn(&c, d.path()) else { panic!("spawned") };
+        let c = ServerConfig {
+            models_dir: d.path().into(),
+            model_file: "x.gguf".into(),
+            context: 256,
+            threads: 1,
+            variant: CpuVariant::Compat,
+        };
+        let Err(e) = Server::spawn(&c, d.path()) else {
+            panic!("spawned")
+        };
         assert_eq!(e.code, crate::errors::ErrorCode::ServerMissing);
     }
 }

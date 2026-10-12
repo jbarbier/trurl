@@ -42,7 +42,10 @@ pub const PINS_JSON: &str = include_str!("../../../pins.json");
 
 pub fn pins() -> &'static Pins {
     static P: OnceLock<Pins> = OnceLock::new();
-    P.get_or_init(|| serde_json::from_str(PINS_JSON).expect("pins.json is valid (checked by scripts/check_pins.py)"))
+    P.get_or_init(|| {
+        serde_json::from_str(PINS_JSON)
+            .expect("pins.json is valid (checked by scripts/check_pins.py)")
+    })
 }
 
 pub fn pinned_model(file: &str) -> Option<&'static ModelPin> {

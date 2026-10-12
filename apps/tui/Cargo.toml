@@ -1,8 +1,13 @@
 [package]
 name = "trurl-tui"
+description = "Trurl in the terminal (Linux, and Windows 7/8.1 where the desktop app cannot run)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
 
 [[bin]]
 name = "trurl"
@@ -10,3 +15,12 @@ path = "src/main.rs"
 
 [dependencies]
 trurl-core.workspace = true
+ratatui.workspace = true
+unicode-width.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+flate2.workspace = true
+tar.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

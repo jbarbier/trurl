@@ -120,7 +120,11 @@ pub struct Hub {
 
 impl Hub {
     pub fn new(http: reqwest::Client, base: impl Into<String>, token: Option<String>) -> Self {
-        Self { http, base: base.into().trim_end_matches('/').to_string(), token: token.filter(|t| !t.trim().is_empty()) }
+        Self {
+            http,
+            base: base.into().trim_end_matches('/').to_string(),
+            token: token.filter(|t| !t.trim().is_empty()),
+        }
     }
 
     fn get(&self, url: String) -> reqwest::RequestBuilder {
@@ -134,9 +138,16 @@ impl Hub {
     /// GET a tiny API route and require real JSON: a captive portal (hotel or
     /// hotspot login page) answers 200 with HTML and must count as offline.
     pub async fn online(&self) -> bool {
-        let r = self.http.get(format!("{}/api/models?limit=1", self.base)).timeout(Duration::from_secs(5)).send().await;
+        let r = self
+            .http
+            .get(format!("{}/api/models?limit=1", self.base))
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await;
         match r {
-            Ok(resp) if resp.status().is_success() => resp.json::<Vec<serde_json::Value>>().await.is_ok(),
+            Ok(resp) if resp.status().is_success() => {
+                resp.json::<Vec<serde_json::Value>>().await.is_ok()
+            }
             _ => false,
         }
     }
@@ -148,26 +159,52 @@ impl Hub {
             self.base,
             urlencode(q)
         );
-        let resp = self.get(url).timeout(Duration::from_secs(20)).send().await.map_err(|e| UserError::hub_failed().with_detail(e.to_string()))?;
+        let resp = self
+            .get(url)
+            .timeout(Duration::from_secs(20))
+            .send()
+            .await
+            .map_err(|e| UserError::hub_failed().with_detail(e.to_string()))?;
         if !resp.status().is_success() {
             return Err(UserError::hub_failed().with_detail(format!("HTTP {}", resp.status())));
         }
-        let hits: Vec<ApiHit> = resp.json().await.map_err(|e| UserError::hub_failed().with_detail(e.to_string()))?;
+        let hits: Vec<ApiHit> = resp
+            .json()
+            .await
+            .map_err(|e| UserError::hub_failed().with_detail(e.to_string()))?;
         Ok(hits
             .into_iter()
-            .map(|h| RepoHit { id: h.id, downloads: h.downloads, likes: h.likes, gated: is_gated(&h.gated), updated: h.last_modified })
+            .map(|h| RepoHit {
+                id: h.id,
+                downloads: h.downloads,
+                likes: h.likes,
+                gated: is_gated(&h.gated),
+                updated: h.last_modified,
+            })
             .collect())
     }
 
     pub async fn files(&self, repo: &str, total_ram: u64) -> Result<RepoFiles, UserError> {
-        let url = format!("{}/api/models/{}?blobs=true", self.base, repo.split('/').map(urlencode).collect::<Vec<_>>().join("/"));
-        let resp = self.get(url).timeout(Duration::from_secs(20)).send().await.map_err(|e| UserError::hub_failed().with_detail(e.to_string()))?;
+        let url = format!(
+            "{}/api/models/{}?blobs=true",
+            self.base,
+            repo.split('/').map(urlencode).collect::<Vec<_>>().join("/")
+        );
+        let resp = self
+            .get(url)
+            .timeout(Duration::from_secs(20))
+            .send()
+            .await
+            .map_err(|e| UserError::hub_failed().with_detail(e.to_string()))?;
         match resp.status().as_u16() {
             200 => {}
             401 | 403 => return Err(UserError::hub_gated(repo)),
             s => return Err(UserError::hub_failed().with_detail(format!("HTTP {s}"))),
         }
-        let r: ApiRepo = resp.json().await.map_err(|e| UserError::hub_failed().with_detail(e.to_string()))?;
+        let r: ApiRepo = resp
+            .json()
+            .await
+            .map_err(|e| UserError::hub_failed().with_detail(e.to_string()))?;
         Ok(repo_files(r, total_ram))
     }
 
@@ -193,15 +230,32 @@ impl Hub {
 }
 
 fn repo_files(r: ApiRepo, total_ram: u64) -> RepoFiles {
-    let license = r.card.as_ref().and_then(|c| c.get("license")).and_then(|l| l.as_str()).map(str::to_string);
+    let license = r
+        .card
+        .as_ref()
+        .and_then(|c| c.get("license"))
+        .and_then(|l| l.as_str())
+        .map(str::to_string);
     let mut files: Vec<RepoFile> = r
         .siblings
         .into_iter()
         .filter(|s| s.rfilename.to_ascii_lowercase().ends_with(".gguf"))
-        .filter(|s| !s.rfilename.rsplit('/').next().unwrap_or("").to_ascii_lowercase().starts_with("mmproj"))
+        .filter(|s| {
+            !s.rfilename
+                .rsplit('/')
+                .next()
+                .unwrap_or("")
+                .to_ascii_lowercase()
+                .starts_with("mmproj")
+        })
         .map(|s| {
             let size = s.lfs.as_ref().and_then(|l| l.size).or(s.size).unwrap_or(0);
-            let name = s.rfilename.rsplit('/').next().unwrap_or(&s.rfilename).to_string();
+            let name = s
+                .rfilename
+                .rsplit('/')
+                .next()
+                .unwrap_or(&s.rfilename)
+                .to_string();
             RepoFile {
                 quant: crate::models::quant_from_name(&name),
                 fit: ram_fit(size, total_ram),
@@ -214,13 +268,23 @@ fn repo_files(r: ApiRepo, total_ram: u64) -> RepoFiles {
         .collect();
     files.sort_by_key(|f| (f.split, f.size));
     let card_str = |k: &str| {
-        r.card.as_ref().and_then(|c| c.get(k)).and_then(|v| match v {
-            serde_json::Value::String(s) => Some(s.clone()),
-            serde_json::Value::Array(a) => a.first().and_then(|x| x.as_str()).map(str::to_string),
-            _ => None,
-        })
+        r.card
+            .as_ref()
+            .and_then(|c| c.get(k))
+            .and_then(|v| match v {
+                serde_json::Value::String(s) => Some(s.clone()),
+                serde_json::Value::Array(a) => {
+                    a.first().and_then(|x| x.as_str()).map(str::to_string)
+                }
+                _ => None,
+            })
     };
-    let g = |k: &str| r.gguf.as_ref().and_then(|g| g.get(k)).and_then(|v| v.as_u64());
+    let g = |k: &str| {
+        r.gguf
+            .as_ref()
+            .and_then(|g| g.get(k))
+            .and_then(|v| v.as_u64())
+    };
     RepoFiles {
         author: r.author.clone(),
         revision: r.sha.clone(),
@@ -230,10 +294,21 @@ fn repo_files(r: ApiRepo, total_ram: u64) -> RepoFiles {
         likes: r.likes,
         updated: r.last_modified.clone(),
         base_model: card_str("base_model"),
-        architecture: r.gguf.as_ref().and_then(|g| g.get("architecture")).and_then(|v| v.as_str()).map(str::to_string),
+        architecture: r
+            .gguf
+            .as_ref()
+            .and_then(|g| g.get("architecture"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
         context_length: g("context_length"),
         parameters: g("total"),
-        tags: r.tags.iter().filter(|t| !t.contains(':') && !t.starts_with("region")).take(12).cloned().collect(),
+        tags: r
+            .tags
+            .iter()
+            .filter(|t| !t.contains(':') && !t.starts_with("region"))
+            .take(12)
+            .cloned()
+            .collect(),
         readme: None,
         id: r.id,
         files,
@@ -266,7 +341,9 @@ pub fn clean_readme(text: &str) -> String {
 pub fn urlencode(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
             _ => format!("%{b:02X}"),
         })
         .collect()
@@ -297,7 +374,14 @@ mod tests {
         assert_eq!(f.revision.len(), 40);
         assert_eq!(f.license.as_deref(), Some("gemma"));
         let names: Vec<&str> = f.files.iter().map(|x| x.path.as_str()).collect();
-        assert_eq!(names, vec!["gemma-3-4b-it-Q4_K_M.gguf", "gemma-3-4b-it-Q8_0.gguf", "big/x-00001-of-00002.gguf"]);
+        assert_eq!(
+            names,
+            vec![
+                "gemma-3-4b-it-Q4_K_M.gguf",
+                "gemma-3-4b-it-Q8_0.gguf",
+                "big/x-00001-of-00002.gguf"
+            ]
+        );
         assert_eq!(f.files[0].quant.as_deref(), Some("Q4_K_M"));
         assert_eq!(f.files[0].fit, RamFit::Green);
         assert_eq!(f.files[1].fit, RamFit::Orange);
@@ -312,7 +396,10 @@ mod tests {
 
     #[test]
     fn readme_front_matter_is_removed() {
-        assert_eq!(clean_readme("---\nlicense: mit\n---\n\n# Title\nBody"), "# Title\nBody");
+        assert_eq!(
+            clean_readme("---\nlicense: mit\n---\n\n# Title\nBody"),
+            "# Title\nBody"
+        );
         assert_eq!(clean_readme("# No front matter"), "# No front matter");
         assert!(clean_readme(&"é".repeat(40_000)).ends_with('…'));
     }

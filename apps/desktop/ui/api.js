@@ -18,7 +18,8 @@
     T.event.listen("trurl", (e) => emit(e.payload));
     return {
       kind: "tauri",
-      call: (cmd, args) => T.core.invoke(cmd, args || {}).catch((e) => Promise.reject(normalizeError(e))),
+      // One Tauri command, `call`, forwards to trurl_core::api::dispatch (same as the bridge).
+      call: (cmd, args) => T.core.invoke("call", { cmd, args: args || {} }).catch((e) => Promise.reject(normalizeError(e))),
       pickModelFile: async () => {
         const path = await T.dialog.open({
           multiple: false,

@@ -57,7 +57,10 @@ impl Settings {
             std::fs::create_dir_all(dir)?;
         }
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?)?;
+        std::fs::write(
+            &tmp,
+            serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?,
+        )?;
         std::fs::rename(&tmp, path)
     }
 
@@ -78,7 +81,11 @@ pub fn clamp_temperature(t: f32) -> f32 {
 
 /// Snap to the closest allowed size at or above the request.
 pub fn clamp_context(c: u32) -> u32 {
-    CONTEXT_CHOICES.iter().copied().find(|&x| x >= c).unwrap_or(*CONTEXT_CHOICES.last().unwrap())
+    CONTEXT_CHOICES
+        .iter()
+        .copied()
+        .find(|&x| x >= c)
+        .unwrap_or(*CONTEXT_CHOICES.last().unwrap())
 }
 
 #[cfg(test)]
@@ -116,7 +123,12 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("settings.json");
         assert_eq!(Settings::load(&p), Settings::default());
-        let s = Settings { system_prompt: "Be kind.".into(), temperature: 0.0, model: Some("a.gguf".into()), ..Default::default() };
+        let s = Settings {
+            system_prompt: "Be kind.".into(),
+            temperature: 0.0,
+            model: Some("a.gguf".into()),
+            ..Default::default()
+        };
         s.save(&p).unwrap();
         assert_eq!(Settings::load(&p), s);
         std::fs::write(&p, "{not json").unwrap();

@@ -105,7 +105,8 @@ def fetch_source(cache: Path) -> Path:
 
 def build(src: Path, build_root: Path, variant: str, cmake: str, jobs: int, os_name: str) -> Path:
     bdir = build_root / variant
-    args = [cmake, "-S", str(src), "-B", str(bdir)] + COMMON + VARIANTS[variant]
+    stamp = [f"-DLLAMA_BUILD_NUMBER={PINS['llama_cpp']['build'].lstrip('b')}", f"-DLLAMA_BUILD_COMMIT={PINS['llama_cpp']['commit'][:9]}"]
+    args = [cmake, "-S", str(src), "-B", str(bdir)] + COMMON + stamp + VARIANTS[variant]
     if os_name == "windows":
         # Static C runtime: no MSVCP140.dll / VCRUNTIME140.dll needed on the learner's PC.
         args += ["-A", "x64", "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded", "-DCMAKE_POLICY_DEFAULT_CMP0091=NEW"]

@@ -60,7 +60,11 @@ impl std::fmt::Display for GgufError {
 
 impl From<std::io::Error> for GgufError {
     fn from(e: std::io::Error) -> Self {
-        if e.kind() == std::io::ErrorKind::UnexpectedEof { GgufError::Truncated } else { GgufError::Io(e.to_string()) }
+        if e.kind() == std::io::ErrorKind::UnexpectedEof {
+            GgufError::Truncated
+        } else {
+            GgufError::Io(e.to_string())
+        }
     }
 }
 
@@ -147,9 +151,18 @@ impl<T: Read + Seek> Reader<T> {
                 let n = self.u64()?;
                 match item_ty {
                     0 | 1 | 7 => self.skip(n)?,
-                    2 | 3 => self.skip(n.checked_mul(2).ok_or(GgufError::Malformed("array".into()))?)?,
-                    4 | 5 | 6 => self.skip(n.checked_mul(4).ok_or(GgufError::Malformed("array".into()))?)?,
-                    10 | 11 | 12 => self.skip(n.checked_mul(8).ok_or(GgufError::Malformed("array".into()))?)?,
+                    2 | 3 => self.skip(
+                        n.checked_mul(2)
+                            .ok_or(GgufError::Malformed("array".into()))?,
+                    )?,
+                    4 | 5 | 6 => self.skip(
+                        n.checked_mul(4)
+                            .ok_or(GgufError::Malformed("array".into()))?,
+                    )?,
+                    10 | 11 | 12 => self.skip(
+                        n.checked_mul(8)
+                            .ok_or(GgufError::Malformed("array".into()))?,
+                    )?,
                     8 => {
                         for _ in 0..n {
                             self.skip_string()?;
@@ -201,7 +214,10 @@ pub fn read_from<T: Read + Seek>(r: T) -> R<GgufInfo> {
         return Err(GgufError::Malformed("counts out of range".into()));
     }
 
-    let mut info = GgufInfo { version, ..Default::default() };
+    let mut info = GgufInfo {
+        version,
+        ..Default::default()
+    };
     let mut kv: Vec<(String, Value)> = Vec::new();
     let mut alignment: u64 = 32;
     for _ in 0..n_kv {
@@ -210,25 +226,35 @@ pub fn read_from<T: Read + Seek>(r: T) -> R<GgufInfo> {
         let keep = key.starts_with("general.") || key == "tokenizer.chat_template";
         let v = rd.value(ty, keep)?;
         if key == "general.alignment" {
-            alignment = as_u64(&v).filter(|a| *a > 0 && a.is_power_of_two()).unwrap_or(32);
+            alignment = as_u64(&v)
+                .filter(|a| *a > 0 && a.is_power_of_two())
+                .unwrap_or(32);
         }
         kv.push((key, v));
     }
 
     let get_str = |k: &str| {
-        kv.iter().find(|(kk, _)| kk == k).and_then(|(_, v)| match v {
-            Value::Str(s) => Some(s.clone()),
-            _ => None,
-        })
+        kv.iter()
+            .find(|(kk, _)| kk == k)
+            .and_then(|(_, v)| match v {
+                Value::Str(s) => Some(s.clone()),
+                _ => None,
+            })
     };
     info.architecture = get_str("general.architecture");
     info.name = get_str("general.name").filter(|s| !s.trim().is_empty());
     info.size_label = get_str("general.size_label");
     if let Some(t) = get_str("tokenizer.chat_template") {
         info.has_chat_template = !t.trim().is_empty();
-        info.template_mentions_thinking = t.contains("<think>") || t.contains("reasoning_content") || t.contains("enable_thinking");
+        info.template_mentions_thinking = t.contains("<think>")
+            || t.contains("reasoning_content")
+            || t.contains("enable_thinking");
     }
-    let num = |k: &str| kv.iter().find(|(kk, _)| kk == k).and_then(|(_, v)| as_u64(v));
+    let num = |k: &str| {
+        kv.iter()
+            .find(|(kk, _)| kk == k)
+            .and_then(|(_, v)| as_u64(v))
+    };
     info.file_type = num("general.file_type");
     info.split_count = num("split.count");
     if let Some(arch) = info.architecture.clone() {
@@ -257,7 +283,11 @@ pub fn read_from<T: Read + Seek>(r: T) -> R<GgufInfo> {
     let header_end = rd.r.stream_position()?;
     let data_start = header_end.div_ceil(alignment) * alignment;
     // The last tensor starts at max_offset and holds at least one byte.
-    info.min_file_size = if n_tensors > 0 { data_start + max_offset + 1 } else { header_end };
+    info.min_file_size = if n_tensors > 0 {
+        data_start + max_offset + 1
+    } else {
+        header_end
+    };
     let len = rd.r.seek(SeekFrom::End(0))?;
     if len < info.min_file_size {
         return Err(GgufError::Truncated);
@@ -359,7 +389,10 @@ pub mod testfile {
                 ("llama.attention.head_count", V::U32(4)),
                 ("llama.attention.head_count_kv", V::U32(2)),
                 ("tokenizer.ggml.tokens", V::StrArray(&["a", "b", "c"])),
-                ("tokenizer.chat_template", V::Str("{% for m in messages %}{{ m.content }}{% endfor %}")),
+                (
+                    "tokenizer.chat_template",
+                    V::Str("{% for m in messages %}{{ m.content }}{% endfor %}"),
+                ),
             ],
             &[("w", 0), ("x", 64)],
             128,
@@ -388,8 +421,14 @@ mod tests {
                 ("qwen3.attention.key_length", V::U32(128)),
                 ("qwen3.attention.value_length", V::U32(128)),
                 ("general.file_type", V::U32(15)),
-                ("tokenizer.ggml.tokens", V::StrArray(&["<unk>", "hello", "world"])),
-                ("tokenizer.chat_template", V::Str("{%- if enable_thinking %}<think>{% endif %}")),
+                (
+                    "tokenizer.ggml.tokens",
+                    V::StrArray(&["<unk>", "hello", "world"]),
+                ),
+                (
+                    "tokenizer.chat_template",
+                    V::Str("{%- if enable_thinking %}<think>{% endif %}"),
+                ),
             ],
             &[("a", 0), ("b", 1024)],
             2048,
@@ -415,8 +454,14 @@ mod tests {
 
     #[test]
     fn rejects_non_gguf_and_empty() {
-        assert_eq!(read_from(Cursor::new(b"PK\x03\x04zipzipzip".to_vec())), Err(GgufError::NotGguf));
-        assert_eq!(read_from(Cursor::new(Vec::<u8>::new())), Err(GgufError::NotGguf));
+        assert_eq!(
+            read_from(Cursor::new(b"PK\x03\x04zipzipzip".to_vec())),
+            Err(GgufError::NotGguf)
+        );
+        assert_eq!(
+            read_from(Cursor::new(Vec::<u8>::new())),
+            Err(GgufError::NotGguf)
+        );
     }
 
     #[test]
@@ -448,7 +493,10 @@ mod tests {
         b.extend_from_slice(&0u64.to_le_bytes());
         b.extend_from_slice(&1u64.to_le_bytes());
         b.extend_from_slice(&u64::MAX.to_le_bytes()); // key length
-        assert!(matches!(read_from(Cursor::new(&b)), Err(GgufError::Malformed(_))));
+        assert!(matches!(
+            read_from(Cursor::new(&b)),
+            Err(GgufError::Malformed(_))
+        ));
     }
 
     #[test]

@@ -69,7 +69,11 @@ impl ThinkSplitter {
                 }
             }
             // Keep back any tail that could be the start of a tag.
-            let keep = partial_tag_suffix(&self.buf, self.in_think, !self.seen_open && !self.seen_close);
+            let keep = partial_tag_suffix(
+                &self.buf,
+                self.in_think,
+                !self.seen_open && !self.seen_close,
+            );
             let flush_to = self.buf.len() - keep;
             if flush_to > 0 {
                 let text: String = self.buf[..flush_to].to_string();
@@ -150,12 +154,18 @@ mod tests {
 
     #[test]
     fn plain_text_passes_through() {
-        assert_eq!(run(&["Hello", " world"]), ("".into(), "Hello world".into(), false));
+        assert_eq!(
+            run(&["Hello", " world"]),
+            ("".into(), "Hello world".into(), false)
+        );
     }
 
     #[test]
     fn whole_tags_in_one_chunk() {
-        assert_eq!(run(&["<think>hmm</think>Yes."]), ("hmm".into(), "Yes.".into(), false));
+        assert_eq!(
+            run(&["<think>hmm</think>Yes."]),
+            ("hmm".into(), "Yes.".into(), false)
+        );
     }
 
     #[test]
@@ -172,7 +182,10 @@ mod tests {
         let text = "<think>step 1\nstep 2</think>Final: 5";
         let chars: Vec<String> = text.chars().map(|c| c.to_string()).collect();
         let refs: Vec<&str> = chars.iter().map(|s| s.as_str()).collect();
-        assert_eq!(run(&refs), ("step 1\nstep 2".into(), "Final: 5".into(), false));
+        assert_eq!(
+            run(&refs),
+            ("step 1\nstep 2".into(), "Final: 5".into(), false)
+        );
     }
 
     #[test]
@@ -185,17 +198,26 @@ mod tests {
 
     #[test]
     fn unterminated_thought_stays_reasoning() {
-        assert_eq!(run(&["<think>still going"]), ("still going".into(), "".into(), false));
+        assert_eq!(
+            run(&["<think>still going"]),
+            ("still going".into(), "".into(), false)
+        );
     }
 
     #[test]
     fn lookalike_text_is_not_held_back_forever() {
-        assert_eq!(run(&["a < b and <th", "ings>"]), ("".into(), "a < b and <things>".into(), false));
+        assert_eq!(
+            run(&["a < b and <th", "ings>"]),
+            ("".into(), "a < b and <things>".into(), false)
+        );
     }
 
     #[test]
     fn multibyte_text_near_a_tag_boundary() {
-        assert_eq!(run(&["<think>é</th", "ink>ñ"]), ("é".into(), "ñ".into(), false));
+        assert_eq!(
+            run(&["<think>é</th", "ink>ñ"]),
+            ("é".into(), "ñ".into(), false)
+        );
     }
 
     #[test]

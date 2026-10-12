@@ -90,8 +90,14 @@ impl Hardware {
         sys.refresh_memory();
         sys.refresh_cpu_list(sysinfo::CpuRefreshKind::nothing());
         let logical = sys.cpus().len().max(1);
-        let physical = sysinfo::System::physical_core_count().unwrap_or(logical).max(1);
-        let cpu_name = sys.cpus().first().map(|c| c.brand().trim().to_string()).unwrap_or_default();
+        let physical = sysinfo::System::physical_core_count()
+            .unwrap_or(logical)
+            .max(1);
+        let cpu_name = sys
+            .cpus()
+            .first()
+            .map(|c| c.brand().trim().to_string())
+            .unwrap_or_default();
         let features = CpuFeatures::detect();
         Hardware {
             total_ram: sys.total_memory(),
@@ -161,7 +167,11 @@ pub fn free_space(path: &std::path::Path) -> Option<u64> {
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
-        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
         let mut free: u64 = 0;
         // SAFETY: wide is NUL-terminated; out-pointers are valid or null as the API allows.
         let ok = unsafe {
@@ -197,7 +207,13 @@ mod tests {
 
     #[test]
     fn variant_tiers() {
-        let all = CpuFeatures { avx: true, avx2: true, fma: true, f16c: true, bmi2: true };
+        let all = CpuFeatures {
+            avx: true,
+            avx2: true,
+            fma: true,
+            f16c: true,
+            bmi2: true,
+        };
         assert_eq!(all.variant(), CpuVariant::Avx2);
         for i in 1..5 {
             let mut f = all;
@@ -210,7 +226,10 @@ mod tests {
             assert_eq!(f.variant(), CpuVariant::Avx, "missing feature {i}");
         }
         // Sandy Bridge: AVX only.
-        let sandy = CpuFeatures { avx: true, ..Default::default() };
+        let sandy = CpuFeatures {
+            avx: true,
+            ..Default::default()
+        };
         assert_eq!(sandy.variant(), CpuVariant::Avx);
         // Core 2, early Atom, Pentium: nothing.
         assert_eq!(CpuFeatures::default().variant(), CpuVariant::Compat);

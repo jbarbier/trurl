@@ -28,15 +28,23 @@ struct Harness {
 }
 
 fn models_src() -> PathBuf {
-    PathBuf::from(std::env::var("TRURL_TEST_MODELS").expect("set TRURL_TEST_MODELS to a folder with the pinned models"))
+    PathBuf::from(
+        std::env::var("TRURL_TEST_MODELS")
+            .expect("set TRURL_TEST_MODELS to a folder with the pinned models"),
+    )
 }
 
 fn llama_root() -> PathBuf {
     if let Some(d) = std::env::var_os("TRURL_LLAMA_DIR") {
         return d.into();
     }
-    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendor/llama").join(std::env::consts::OS);
-    assert!(p.join("compat").is_dir(), "build llama-server first: python3 scripts/build_llama.py");
+    let p = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../vendor/llama")
+        .join(std::env::consts::OS);
+    assert!(
+        p.join("compat").is_dir(),
+        "build llama-server first: python3 scripts/build_llama.py"
+    );
     p
 }
 
@@ -48,18 +56,34 @@ fn harness(models: &[&str], tweak: impl FnOnce(&Path)) -> Harness {
     for m in models {
         let src = models_src().join(m);
         let dst = paths.models().join(m);
-        std::fs::hard_link(&src, &dst).or_else(|_| std::fs::copy(&src, &dst).map(|_| ())).unwrap();
+        std::fs::hard_link(&src, &dst)
+            .or_else(|_| std::fs::copy(&src, &dst).map(|_| ()))
+            .unwrap();
     }
     tweak(home.path());
     let events: Arc<Mutex<Vec<Event>>> = Arc::default();
     let ev = events.clone();
-    let cfg = AppConfig { paths, llama_root: Some(llama_root()), hf_base: "http://127.0.0.1:9".into(), user_agent: "trurl-test".into() };
+    let cfg = AppConfig {
+        paths,
+        llama_root: Some(llama_root()),
+        hf_base: "http://127.0.0.1:9".into(),
+        user_agent: "trurl-test".into(),
+    };
     let app = App::start(cfg, Arc::new(move |e| ev.lock().unwrap().push(e)));
-    Harness { app, events, _home: home }
+    Harness {
+        app,
+        events,
+        _home: home,
+    }
 }
 
 impl Harness {
-    async fn wait<T>(&self, what: &str, secs: u64, mut f: impl FnMut(&App, &[Event]) -> Option<T>) -> T {
+    async fn wait<T>(
+        &self,
+        what: &str,
+        secs: u64,
+        mut f: impl FnMut(&App, &[Event]) -> Option<T>,
+    ) -> T {
         let t0 = Instant::now();
         loop {
             {
@@ -68,7 +92,10 @@ impl Harness {
                     return v;
                 }
             }
-            assert!(t0.elapsed() < Duration::from_secs(secs), "timed out waiting for {what}");
+            assert!(
+                t0.elapsed() < Duration::from_secs(secs),
+                "timed out waiting for {what}"
+            );
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
@@ -88,7 +115,12 @@ impl Harness {
     /// Send and wait for the turn to finish; returns the finished turn.
     async fn ask(&self, text: &str) -> trurl_core::chat::Turn {
         let id = self.app.send(text).expect("send");
-        self.wait("turn finished", 600, |app, _| app.turns().into_iter().find(|t| t.id == id && t.status != TurnStatus::Streaming)).await
+        self.wait("turn finished", 600, |app, _| {
+            app.turns()
+                .into_iter()
+                .find(|t| t.id == id && t.status != TurnStatus::Streaming)
+        })
+        .await
     }
 }
 
@@ -97,12 +129,31 @@ impl Harness {
 async fn chat_streams_tokens_and_answers() {
     let h = harness(&[GEMMA], |_| {});
     h.ready(GEMMA).await;
-    let t = h.ask("What is the capital of Ghana? Answer in one word.").await;
+    let t = h
+        .ask("What is the capital of Ghana? Answer in one word.")
+        .await;
     assert_eq!(t.status, TurnStatus::Done, "{t:?}");
     assert!(t.answer.to_lowercase().contains("accra"), "{}", t.answer);
     assert!(t.reasoning.is_empty());
-    let deltas = h.events.lock().unwrap().iter().filter(|e| matches!(e, Event::TurnDelta { answer: Some(_), .. })).count();
-    assert!(deltas >= 2, "answer should stream in several pieces, got {deltas}");
+    let deltas = h
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                Event::TurnDelta {
+                    answer: Some(_),
+                    ..
+                }
+            )
+        })
+        .count();
+    assert!(
+        deltas >= 2,
+        "answer should stream in several pieces, got {deltas}"
+    );
     h.app.shutdown().await;
 }
 
@@ -119,9 +170,34 @@ async fn reasoning_is_separate_timed_and_never_sent_back() {
     assert!(t.thought_ms.is_some());
     // The reasoning streamed live, before the answer.
     let ev = h.events.lock().unwrap().clone();
-    let first_r = ev.iter().position(|e| matches!(e, Event::TurnDelta { reasoning: Some(_), .. })).unwrap();
-    let thought = ev.iter().position(|e| matches!(e, Event::TurnThought { .. })).unwrap();
-    let first_a = ev.iter().position(|e| matches!(e, Event::TurnDelta { answer: Some(_), .. })).unwrap();
+    let first_r = ev
+        .iter()
+        .position(|e| {
+            matches!(
+                e,
+                Event::TurnDelta {
+                    reasoning: Some(_),
+                    ..
+                }
+            )
+        })
+        .unwrap();
+    let thought = ev
+        .iter()
+        .position(|e| matches!(e, Event::TurnThought { .. }))
+        .unwrap();
+    let first_a = ev
+        .iter()
+        .position(|e| {
+            matches!(
+                e,
+                Event::TurnDelta {
+                    answer: Some(_),
+                    ..
+                }
+            )
+        })
+        .unwrap();
     assert!(first_r < thought && thought < first_a);
     let h2 = trurl_core::chat::history("", &h.app.turns(), "next");
     assert!(h2.iter().all(|m| !m.content.contains(t.reasoning.trim())));
@@ -135,7 +211,11 @@ async fn no_think_switch_leaves_reasoning_empty() {
     h.ready(QWEN).await;
     let t = h.ask("/no_think Say hello in French, one word.").await;
     assert_eq!(t.status, TurnStatus::Done);
-    assert!(t.reasoning.trim().is_empty(), "reasoning: {:?}", t.reasoning);
+    assert!(
+        t.reasoning.trim().is_empty(),
+        "reasoning: {:?}",
+        t.reasoning
+    );
     assert!(!t.answer.trim().is_empty());
     h.app.shutdown().await;
 }
@@ -184,15 +264,34 @@ async fn stop_then_chat_again_keeps_gemma_working() {
     // Stop before any answer arrives: the turn must not break the next request.
     let id = h.app.send("Write a long story about a goat.").unwrap();
     h.app.stop_generation();
-    let t = h.wait("stopped", 60, |app, _| app.turns().into_iter().find(|t| t.id == id && t.status != TurnStatus::Streaming)).await;
+    let t = h
+        .wait("stopped", 60, |app, _| {
+            app.turns()
+                .into_iter()
+                .find(|t| t.id == id && t.status != TurnStatus::Streaming)
+        })
+        .await;
     assert_eq!(t.status, TurnStatus::Stopped);
     // Stop in the middle of an answer.
     let id = h.app.send("Write a long story about a cat.").unwrap();
-    h.wait("some answer", 120, |app, _| app.turns().into_iter().find(|t| t.id == id && t.answer.len() > 20)).await;
+    h.wait("some answer", 120, |app, _| {
+        app.turns()
+            .into_iter()
+            .find(|t| t.id == id && t.answer.len() > 20)
+    })
+    .await;
     h.app.stop_generation();
-    let t = h.wait("stopped", 60, |app, _| app.turns().into_iter().find(|t| t.id == id && t.status != TurnStatus::Streaming)).await;
+    let t = h
+        .wait("stopped", 60, |app, _| {
+            app.turns()
+                .into_iter()
+                .find(|t| t.id == id && t.status != TurnStatus::Streaming)
+        })
+        .await;
     assert_eq!(t.status, TurnStatus::Stopped);
-    let t = h.ask("Thanks. What animal was the story about? One word.").await;
+    let t = h
+        .ask("Thanks. What animal was the story about? One word.")
+        .await;
     assert_eq!(t.status, TurnStatus::Done, "{t:?}");
     assert!(t.answer.to_lowercase().contains("cat"), "{}", t.answer);
     h.app.shutdown().await;
@@ -203,7 +302,8 @@ async fn stop_then_chat_again_keeps_gemma_working() {
 async fn system_prompt_is_obeyed_and_new_chat_forgets() {
     let h = harness(&[GEMMA], |_| {});
     h.ready(GEMMA).await;
-    h.app.set_system_prompt("You are a pirate. Always start your reply with the word Arr.");
+    h.app
+        .set_system_prompt("You are a pirate. Always start your reply with the word Arr.");
     let t = h.ask("Hello!").await;
     assert!(t.answer.to_lowercase().starts_with("arr"), "{}", t.answer);
     h.app.set_system_prompt("");
@@ -291,13 +391,41 @@ async fn damaged_model_gets_a_plain_error() {
     h.app.shutdown().await;
 }
 
+/// Windows CI only (TRURL_EXPECT_OFFLINE=1, set by scripts/run_evals.ps1 after
+/// blocking the network): proves the firewall block works, so every other eval
+/// really ran offline. On Linux the network shim proves the same thing.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn network_is_really_blocked() {
+    if std::env::var_os("TRURL_EXPECT_OFFLINE").is_none() {
+        return;
+    }
+    let home = tempfile::tempdir().unwrap();
+    let cfg = AppConfig {
+        paths: Paths::at(home.path()),
+        llama_root: Some(llama_root()),
+        hf_base: trurl_core::hub::HF_BASE.into(),
+        user_agent: "trurl-test".into(),
+    };
+    let app = App::start(cfg, Arc::new(|_| {}));
+    assert!(
+        !app.hub_online().await,
+        "Hugging Face answered: the network is not blocked, so the evals did not run offline"
+    );
+    app.shutdown().await;
+}
+
 fn kill_llama_servers() {
     #[cfg(unix)]
     {
-        let _ = std::process::Command::new("pkill").args(["-9", "-f", "llama-server -m gemma"]).status();
+        let _ = std::process::Command::new("pkill")
+            .args(["-9", "-f", "llama-server -m gemma"])
+            .status();
     }
     #[cfg(windows)]
     {
-        let _ = std::process::Command::new("taskkill").args(["/F", "/IM", "llama-server.exe"]).status();
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "llama-server.exe"])
+            .status();
     }
 }

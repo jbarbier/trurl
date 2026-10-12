@@ -100,13 +100,17 @@ fn parse_line(raw: &[u8]) -> Option<SseItem> {
     if let Ok(env) = serde_json::from_str::<ErrorEnvelope>(data) {
         return Some(SseItem::Error(env.error));
     }
-    serde_json::from_str::<ChatChunk>(data).ok().map(SseItem::Chunk)
+    serde_json::from_str::<ChatChunk>(data)
+        .ok()
+        .map(SseItem::Chunk)
 }
 
 /// Parse a non-streamed error body (llama-server answers 4xx with JSON even when
 /// the request asked for a stream).
 pub fn parse_error_body(body: &str) -> Option<ServerError> {
-    serde_json::from_str::<ErrorEnvelope>(body).ok().map(|e| e.error)
+    serde_json::from_str::<ErrorEnvelope>(body)
+        .ok()
+        .map(|e| e.error)
 }
 
 #[cfg(test)]
@@ -185,7 +189,8 @@ mod tests {
     #[test]
     fn crlf_and_missing_final_newline() {
         let mut p = SseParser::new();
-        let mut items = p.push(b"data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\r\n\r\ndata: [DONE]");
+        let mut items =
+            p.push(b"data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\r\n\r\ndata: [DONE]");
         items.extend(p.finish());
         assert_eq!(kinds(&items), vec!["r=None c=Some(\"a\") f=None", "done"]);
     }
@@ -193,7 +198,9 @@ mod tests {
     #[test]
     fn error_object_in_stream() {
         let mut p = SseParser::new();
-        let items = p.push(b"data: {\"error\":{\"code\":500,\"message\":\"boom\",\"type\":\"server_error\"}}\n");
+        let items = p.push(
+            b"data: {\"error\":{\"code\":500,\"message\":\"boom\",\"type\":\"server_error\"}}\n",
+        );
         assert_eq!(kinds(&items), vec!["error:boom"]);
     }
 
@@ -208,6 +215,9 @@ mod tests {
     #[test]
     fn ignores_comments_and_garbage() {
         let mut p = SseParser::new();
-        assert!(p.push(b": keep-alive\n\nevent: x\nnot json\ndata: {not json}\n").is_empty());
+        assert!(
+            p.push(b": keep-alive\n\nevent: x\nnot json\ndata: {not json}\n")
+                .is_empty()
+        );
     }
 }

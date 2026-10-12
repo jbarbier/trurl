@@ -38,7 +38,10 @@ impl AppConfig {
         AppConfig {
             paths: Paths::from_env(),
             llama_root: crate::paths::llama_root(),
-            hf_base: std::env::var("TRURL_HF_BASE").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| HF_BASE.to_string()),
+            hf_base: std::env::var("TRURL_HF_BASE")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| HF_BASE.to_string()),
             user_agent: format!("Trurl/{} ({front_end})", crate::VERSION),
         }
     }
@@ -96,8 +99,11 @@ impl App {
         let settings = Settings::load(&cfg.paths.settings());
         let verified = VerifiedCache::load(&cfg.paths.verified_cache());
         // llama-server is local: never send its traffic through a proxy.
-        let local_http = reqwest::Client::builder().no_proxy().build().expect("http client");
-        let hub_http = reqwest::Client::builder()
+        let local_http = crate::net::client_builder()
+            .no_proxy()
+            .build()
+            .expect("http client");
+        let hub_http = crate::net::client_builder()
             .user_agent(cfg.user_agent.clone())
             .connect_timeout(Duration::from_secs(10))
             .read_timeout(Duration::from_secs(30))
@@ -168,7 +174,12 @@ impl App {
     }
 
     fn downloads(&self) -> Downloads {
-        self.inner.downloads.lock().unwrap().clone().expect("downloads initialised")
+        self.inner
+            .downloads
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("downloads initialised")
     }
 
     // ----- snapshot and settings -------------------------------------------
@@ -211,12 +222,16 @@ impl App {
 
     pub fn emit_snapshot(&self) {
         let s = self.snapshot();
-        self.emit(Event::Snapshot { snapshot: Box::new(s) });
+        self.emit(Event::Snapshot {
+            snapshot: Box::new(s),
+        });
     }
 
     fn save_settings(&self, s: &Settings) {
         let _ = s.save(&self.inner.paths.settings());
-        self.emit(Event::Settings { settings: Self::public_settings(s) });
+        self.emit(Event::Settings {
+            settings: Self::public_settings(s),
+        });
     }
 
     pub fn set_system_prompt(&self, text: &str) {
@@ -282,7 +297,11 @@ impl App {
         if let Some(root) = &self.inner.llama_root {
             let mut cur = Some(v);
             while let Some(c) = cur {
-                if root.join(c.dir_name()).join(crate::paths::server_exe_name()).is_file() {
+                if root
+                    .join(c.dir_name())
+                    .join(crate::paths::server_exe_name())
+                    .is_file()
+                {
                     return c;
                 }
                 cur = c.fallback();
@@ -296,7 +315,11 @@ impl App {
     pub fn rescan(&self) {
         let models = {
             let st = self.inner.state.lock().unwrap();
-            models::scan(&self.inner.paths.models(), self.inner.hw.total_ram, &st.verified)
+            models::scan(
+                &self.inner.paths.models(),
+                self.inner.hw.total_ram,
+                &st.verified,
+            )
         };
         self.inner.state.lock().unwrap().models = models.clone();
         self.emit(Event::Models { models });
@@ -320,7 +343,13 @@ impl App {
 
     /// Hash bundled models once (cached by size and date), so a damaged USB copy is caught.
     fn verify_bundled_in_background(&self) {
-        let pending = self.inner.state.lock().unwrap().verified.pending(&self.inner.paths.models());
+        let pending = self
+            .inner
+            .state
+            .lock()
+            .unwrap()
+            .verified
+            .pending(&self.inner.paths.models());
         if pending.is_empty() {
             return;
         }
@@ -328,22 +357,37 @@ impl App {
         tokio::task::spawn_blocking(move || {
             for p in pending {
                 let file = p.file_name().unwrap().to_string_lossy().into_owned();
-                let Some(pin) = crate::pins::pinned_model(&file) else { continue };
+                let Some(pin) = crate::pins::pinned_model(&file) else {
+                    continue;
+                };
                 let total = pin.size;
                 let mut last = std::time::Instant::now();
                 let r = models::sha256_file(&p, |done| {
                     if last.elapsed() > Duration::from_millis(500) {
                         last = std::time::Instant::now();
-                        me.emit(Event::VerifyProgress { file: file.clone(), done, total });
+                        me.emit(Event::VerifyProgress {
+                            file: file.clone(),
+                            done,
+                            total,
+                        });
                     }
                 });
                 if me.inner.shutdown.is_cancelled() {
                     return;
                 }
                 if let Ok(h) = r {
-                    me.inner.state.lock().unwrap().verified.set(&p, h == pin.sha256);
+                    me.inner
+                        .state
+                        .lock()
+                        .unwrap()
+                        .verified
+                        .set(&p, h == pin.sha256);
                 }
-                me.emit(Event::VerifyProgress { file: file.clone(), done: total, total });
+                me.emit(Event::VerifyProgress {
+                    file: file.clone(),
+                    done: total,
+                    total,
+                });
                 me.rescan();
             }
         });
@@ -352,25 +396,38 @@ impl App {
     pub fn import_model(&self, src: PathBuf) {
         let me = self.clone();
         tokio::task::spawn_blocking(move || {
-            let file = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let file = src
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             let mut last = std::time::Instant::now();
             let r = models::import(&src, &me.inner.paths.models(), |done, total| {
                 if last.elapsed() > Duration::from_millis(200) || done == total {
                     last = std::time::Instant::now();
-                    me.emit(Event::ImportProgress { file: file.clone(), done, total });
+                    me.emit(Event::ImportProgress {
+                        file: file.clone(),
+                        done,
+                        total,
+                    });
                 }
             });
             match r {
                 Ok(name) => {
                     me.rescan();
-                    me.emit(Event::ImportFinished { file: Some(name.clone()), error: None });
+                    me.emit(Event::ImportFinished {
+                        file: Some(name.clone()),
+                        error: None,
+                    });
                     let idle = matches!(me.inner.state.lock().unwrap().engine, EngineState::Idle);
                     if idle {
                         me.load(name);
                     }
                     me.verify_bundled_in_background();
                 }
-                Err(e) => me.emit(Event::ImportFinished { file: None, error: Some(e) }),
+                Err(e) => me.emit(Event::ImportFinished {
+                    file: None,
+                    error: Some(e),
+                }),
             }
         });
     }
@@ -378,9 +435,17 @@ impl App {
     /// Delete a model. If it is the one loaded, the server is stopped first:
     /// Windows cannot delete a file that is memory-mapped.
     pub async fn delete_model(&self, file: &str) -> Result<(), UserError> {
-        let loaded = self.inner.endpoint.lock().unwrap().as_ref().map(|e| e.file.clone());
+        let loaded = self
+            .inner
+            .endpoint
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|e| e.file.clone());
         let engine_file = match &self.inner.state.lock().unwrap().engine {
-            EngineState::Loading { file, .. } | EngineState::Ready { file, .. } | EngineState::Failed { file, .. } => Some(file.clone()),
+            EngineState::Loading { file, .. }
+            | EngineState::Ready { file, .. }
+            | EngineState::Failed { file, .. } => Some(file.clone()),
             EngineState::Idle => None,
         };
         let is_current = loaded.as_deref() == Some(file) || engine_file.as_deref() == Some(file);
@@ -390,7 +455,9 @@ impl App {
         }
         let dir = self.inner.paths.models();
         let f = file.to_string();
-        let r = tokio::task::spawn_blocking(move || models::delete(&dir, &f)).await.unwrap_or_else(|e| Err(UserError::internal(e.to_string())));
+        let r = tokio::task::spawn_blocking(move || models::delete(&dir, &f))
+            .await
+            .unwrap_or_else(|e| Err(UserError::internal(e.to_string())));
         if let Err(e) = &r {
             self.emit(Event::Notice { error: e.clone() });
         }
@@ -459,7 +526,13 @@ impl App {
     pub fn load(&self, file: String) {
         self.stop_generation();
         let cancel = CancellationToken::new();
-        if let Some(old) = self.inner.load_cancel.lock().unwrap().replace(cancel.clone()) {
+        if let Some(old) = self
+            .inner
+            .load_cancel
+            .lock()
+            .unwrap()
+            .replace(cancel.clone())
+        {
             old.cancel();
         }
         let name = self.model_name(&file);
@@ -471,7 +544,10 @@ impl App {
         };
         self.save_settings(&cfg_base);
         *self.inner.endpoint.lock().unwrap() = None;
-        self.set_engine(EngineState::Loading { file: file.clone(), name: name.clone() });
+        self.set_engine(EngineState::Loading {
+            file: file.clone(),
+            name: name.clone(),
+        });
         let me = self.clone();
         tokio::spawn(async move {
             let result = me.load_inner(&file, &name, &cancel).await;
@@ -480,14 +556,25 @@ impl App {
                 return;
             }
             match result {
-                Ok(ctx) => me.set_engine(EngineState::Ready { file, name, context: ctx }),
+                Ok(ctx) => me.set_engine(EngineState::Ready {
+                    file,
+                    name,
+                    context: ctx,
+                }),
                 Err(error) => me.set_engine(EngineState::Failed { file, name, error }),
             }
         });
     }
 
-    async fn load_inner(&self, file: &str, name: &str, cancel: &CancellationToken) -> Result<u32, UserError> {
-        let Some(root) = self.inner.llama_root.clone() else { return Err(UserError::server_missing()) };
+    async fn load_inner(
+        &self,
+        file: &str,
+        name: &str,
+        cancel: &CancellationToken,
+    ) -> Result<u32, UserError> {
+        let Some(root) = self.inner.llama_root.clone() else {
+            return Err(UserError::server_missing());
+        };
         let mut guard = self.inner.server.lock().await;
         if cancel.is_cancelled() {
             return Err(UserError::server_start());
@@ -495,7 +582,15 @@ impl App {
         if let Some(mut old) = guard.take() {
             tokio::task::spawn_blocking(move || old.stop()).await.ok();
         }
-        if let Some(m) = self.inner.state.lock().unwrap().models.iter().find(|m| m.file == file) {
+        if let Some(m) = self
+            .inner
+            .state
+            .lock()
+            .unwrap()
+            .models
+            .iter()
+            .find(|m| m.file == file)
+        {
             if m.broken {
                 return Err(UserError::model_corrupt(name));
             }
@@ -569,12 +664,18 @@ impl App {
                 };
                 let Some(file) = ready_file else { continue };
                 let died = {
-                    let Ok(mut guard) = me.inner.server.try_lock() else { continue };
+                    let Ok(mut guard) = me.inner.server.try_lock() else {
+                        continue;
+                    };
                     guard.as_mut().and_then(|s| s.exited()).is_some()
                 };
                 if died {
                     let name = me.model_name(&file);
-                    me.set_engine(EngineState::Failed { file, name, error: UserError::server_crashed() });
+                    me.set_engine(EngineState::Failed {
+                        file,
+                        name,
+                        error: UserError::server_crashed(),
+                    });
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     me.reload();
                 }
@@ -650,7 +751,12 @@ impl App {
             let on = |d: StreamDelta| me.apply_delta(id, d);
             let end = chat::stream(
                 &me.inner.local_http,
-                ChatRequest { base_url: &ep.base_url, api_key: &ep.api_key, messages, temperature },
+                ChatRequest {
+                    base_url: &ep.base_url,
+                    api_key: &ep.api_key,
+                    messages,
+                    temperature,
+                },
                 &cancel,
                 on,
             )
@@ -663,20 +769,37 @@ impl App {
     fn apply_delta(&self, id: u64, d: StreamDelta) {
         let ev = {
             let mut st = self.inner.state.lock().unwrap();
-            let Some(t) = st.turns.iter_mut().find(|t| t.id == id) else { return };
+            let Some(t) = st.turns.iter_mut().find(|t| t.id == id) else {
+                return;
+            };
             match d {
                 StreamDelta::Reasoning(r) => {
                     t.reasoning.push_str(&r);
-                    Event::TurnDelta { id, reasoning: Some(r), answer: None, reasoning_from_answer: false }
+                    Event::TurnDelta {
+                        id,
+                        reasoning: Some(r),
+                        answer: None,
+                        reasoning_from_answer: false,
+                    }
                 }
                 StreamDelta::Answer(a) => {
                     t.answer.push_str(&a);
-                    Event::TurnDelta { id, reasoning: None, answer: Some(a), reasoning_from_answer: false }
+                    Event::TurnDelta {
+                        id,
+                        reasoning: None,
+                        answer: Some(a),
+                        reasoning_from_answer: false,
+                    }
                 }
                 StreamDelta::AnswerWasReasoning => {
                     let moved = std::mem::take(&mut t.answer);
                     t.reasoning = moved + &t.reasoning;
-                    Event::TurnDelta { id, reasoning: None, answer: None, reasoning_from_answer: true }
+                    Event::TurnDelta {
+                        id,
+                        reasoning: None,
+                        answer: None,
+                        reasoning_from_answer: true,
+                    }
                 }
                 StreamDelta::ThoughtFor(ms) => {
                     t.thought_ms = Some(ms);
@@ -692,7 +815,9 @@ impl App {
         let turn = {
             let mut st = self.inner.state.lock().unwrap();
             st.generating = false;
-            let Some(t) = st.turns.iter_mut().find(|t| t.id == id) else { return };
+            let Some(t) = st.turns.iter_mut().find(|t| t.id == id) else {
+                return;
+            };
             match end {
                 StreamEnd::Done => t.status = TurnStatus::Done,
                 StreamEnd::Stopped => t.status = TurnStatus::Stopped,
@@ -717,7 +842,14 @@ impl App {
         self.emit(Event::TurnFinished { turn });
         self.emit(Event::Generating { generating: false });
         if crashed {
-            let still_same = self.inner.endpoint.lock().unwrap().as_ref().map(|e| e.base_url == ep.base_url).unwrap_or(false);
+            let still_same = self
+                .inner
+                .endpoint
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|e| e.base_url == ep.base_url)
+                .unwrap_or(false);
             if still_same {
                 self.set_engine(EngineState::Failed {
                     file: ep.file.clone(),
@@ -733,7 +865,11 @@ impl App {
 
     fn hub(&self) -> Hub {
         let token = self.inner.state.lock().unwrap().settings.hf_token.clone();
-        Hub::new(self.inner.hub_http.clone(), self.inner.hf_base.clone(), Some(token))
+        Hub::new(
+            self.inner.hub_http.clone(),
+            self.inner.hf_base.clone(),
+            Some(token),
+        )
     }
 
     pub async fn hub_online(&self) -> bool {

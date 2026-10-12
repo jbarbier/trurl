@@ -43,7 +43,10 @@ pub struct Turn {
 impl Turn {
     /// Does this turn go back to the model next time?
     pub fn in_history(&self) -> bool {
-        matches!(self.status, TurnStatus::Done | TurnStatus::Stopped | TurnStatus::Cut) && !self.answer.trim().is_empty()
+        matches!(
+            self.status,
+            TurnStatus::Done | TurnStatus::Stopped | TurnStatus::Cut
+        ) && !self.answer.trim().is_empty()
     }
 }
 
@@ -56,13 +59,25 @@ pub struct Message {
 pub fn history(system_prompt: &str, turns: &[Turn], new_user: &str) -> Vec<Message> {
     let mut m = Vec::new();
     if !system_prompt.trim().is_empty() {
-        m.push(Message { role: "system", content: system_prompt.to_string() });
+        m.push(Message {
+            role: "system",
+            content: system_prompt.to_string(),
+        });
     }
     for t in turns.iter().filter(|t| t.in_history()) {
-        m.push(Message { role: "user", content: t.user.clone() });
-        m.push(Message { role: "assistant", content: t.answer.clone() });
+        m.push(Message {
+            role: "user",
+            content: t.user.clone(),
+        });
+        m.push(Message {
+            role: "assistant",
+            content: t.answer.clone(),
+        });
     }
-    m.push(Message { role: "user", content: new_user.to_string() });
+    m.push(Message {
+        role: "user",
+        content: new_user.to_string(),
+    });
     m
 }
 
@@ -130,7 +145,12 @@ pub struct ChatRequest<'a> {
 }
 
 /// Stream one answer. `on` is called for every visible change.
-pub async fn stream(http: &reqwest::Client, req: ChatRequest<'_>, cancel: &CancellationToken, mut on: impl FnMut(StreamDelta)) -> StreamEnd {
+pub async fn stream(
+    http: &reqwest::Client,
+    req: ChatRequest<'_>,
+    cancel: &CancellationToken,
+    mut on: impl FnMut(StreamDelta),
+) -> StreamEnd {
     let body = serde_json::json!({
         "messages": req.messages,
         "stream": true,
@@ -168,10 +188,15 @@ pub async fn stream(http: &reqwest::Client, req: ChatRequest<'_>, cancel: &Cance
             match item {
                 SseItem::Done => return Some(StreamEnd::Done),
                 SseItem::Error(e) => {
-                    return Some(StreamEnd::Failed(error_from_server(e.kind.as_deref(), &e.message)));
+                    return Some(StreamEnd::Failed(error_from_server(
+                        e.kind.as_deref(),
+                        &e.message,
+                    )));
                 }
                 SseItem::Chunk(c) => {
-                    let Some(ch) = c.choices.into_iter().next() else { continue };
+                    let Some(ch) = c.choices.into_iter().next() else {
+                        continue;
+                    };
                     let mut pieces: Vec<Piece> = Vec::new();
                     if let Some(r) = ch.delta.reasoning_content.filter(|s| !s.is_empty()) {
                         pieces.push(Piece::Reasoning(r));
@@ -195,7 +220,9 @@ pub async fn stream(http: &reqwest::Client, req: ChatRequest<'_>, cancel: &Cance
                                     if !answered {
                                         answered = true;
                                         if let Some(t0) = first_reasoning {
-                                            on(StreamDelta::ThoughtFor(t0.elapsed().as_millis() as u64));
+                                            on(StreamDelta::ThoughtFor(
+                                                t0.elapsed().as_millis() as u64
+                                            ));
                                         }
                                     }
                                     on(StreamDelta::Answer(a));
@@ -236,7 +263,8 @@ pub async fn stream(http: &reqwest::Client, req: ChatRequest<'_>, cancel: &Cance
             Some(Err(e)) => return StreamEnd::ServerGone(e.to_string()),
             None => {
                 let items = parser.finish();
-                return handle(items, &mut on).unwrap_or(StreamEnd::ServerGone("stream ended early".into()));
+                return handle(items, &mut on)
+                    .unwrap_or(StreamEnd::ServerGone("stream ended early".into()));
             }
         }
     }
@@ -252,7 +280,10 @@ fn error_from_body(status: u16, body: &str) -> UserError {
 
 fn error_from_server(kind: Option<&str>, message: &str) -> UserError {
     let m = message.to_ascii_lowercase();
-    if kind == Some("exceed_context_size_error") || m.contains("exceeds the available context size") || m.contains("context size") && m.contains("exceed") {
+    if kind == Some("exceed_context_size_error")
+        || m.contains("exceeds the available context size")
+        || m.contains("context size") && m.contains("exceed")
+    {
         UserError::context_full().with_detail(message.to_string())
     } else if kind == Some("unavailable_error") || m.contains("loading model") {
         UserError::server_start().with_detail(message.to_string())
@@ -266,7 +297,16 @@ mod tests {
     use super::*;
 
     fn turn(user: &str, answer: &str, status: TurnStatus) -> Turn {
-        Turn { id: 0, user: user.into(), reasoning: "secret thoughts".into(), answer: answer.into(), model: "m".into(), status, thought_ms: None, error: None }
+        Turn {
+            id: 0,
+            user: user.into(),
+            reasoning: "secret thoughts".into(),
+            answer: answer.into(),
+            model: "m".into(),
+            status,
+            thought_ms: None,
+            error: None,
+        }
     }
 
     #[test]
@@ -282,7 +322,13 @@ mod tests {
     #[test]
     fn empty_system_prompt_sends_nothing() {
         let h = history("   ", &[], "Hi");
-        assert_eq!(h, vec![Message { role: "user", content: "Hi".into() }]);
+        assert_eq!(
+            h,
+            vec![Message {
+                role: "user",
+                content: "Hi".into()
+            }]
+        );
     }
 
     #[test]
@@ -295,7 +341,11 @@ mod tests {
             turn("Q5", "cut off", TurnStatus::Cut),
         ];
         let h = history("", &turns, "Q6");
-        let users: Vec<&str> = h.iter().filter(|m| m.role == "user").map(|m| m.content.as_str()).collect();
+        let users: Vec<&str> = h
+            .iter()
+            .filter(|m| m.role == "user")
+            .map(|m| m.content.as_str())
+            .collect();
         assert_eq!(users, vec!["Q1", "Q4", "Q5", "Q6"]);
         // Always alternates.
         for w in h.windows(2) {
@@ -306,7 +356,13 @@ mod tests {
     #[test]
     fn context_errors_map_to_the_course_message() {
         let body = r#"{"error":{"code":400,"message":"request (609 tokens) exceeds the available context size (256 tokens), try increasing it","type":"exceed_context_size_error"}}"#;
-        assert_eq!(error_from_body(400, body).code, crate::errors::ErrorCode::ContextFull);
-        assert_eq!(error_from_body(500, "not json").code, crate::errors::ErrorCode::Internal);
+        assert_eq!(
+            error_from_body(400, body).code,
+            crate::errors::ErrorCode::ContextFull
+        );
+        assert_eq!(
+            error_from_body(500, "not json").code,
+            crate::errors::ErrorCode::Internal
+        );
     }
 }

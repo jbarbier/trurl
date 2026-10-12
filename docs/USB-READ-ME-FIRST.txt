@@ -1,0 +1,34 @@
+TRURL ON A USB STICK
+====================
+
+This stick installs Trurl and its models. No internet is needed.
+
+ON A WINDOWS 10 OR 11 COMPUTER
+
+1. Double-click Trurl_..._x64-offline-setup.exe
+2. If Windows says "Windows protected your PC", click "More info", then
+   "Run anyway". (Trurl is safe; this message shows for new programs.)
+3. Click Next until it finishes. It copies the models from the "models" folder:
+   this takes 2 to 6 minutes. Do not remove the stick until it says it is done.
+4. Open Trurl from the Start menu.
+
+No administrator password is needed. Trurl installs for the current user only.
+
+ON A LINUX COMPUTER (if the "linux" folder is on this stick)
+
+1. Open a terminal in the "linux" folder.
+2. tar xzf trurl-*-linux-x64.tar.gz
+3. sh trurl-*-linux-x64/install.sh
+   (it also copies the models from this stick)
+4. Type: trurl
+
+WHAT IS ON THIS STICK
+
+  models/             Gemma 3 1B (806 MB), Gemma 3 4B (2.5 GB), Qwen3 0.6B (484 MB)
+  LICENSES/           Gemma Terms of Use and every other license
+  SHA256SUMS.txt      to check that a copy is complete
+
+If a computer has only 4 GB of memory, use Gemma 3 1B or Qwen3 0.6B. The model
+list in Trurl shows a green dot for models that fit easily.
+
+To check a copied stick on Linux:  sha256sum -c SHA256SUMS.txt
