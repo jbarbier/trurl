@@ -94,18 +94,18 @@ async fn serve(State(s): State<Arc<Srv>>, headers: HeaderMap) -> Response {
         Mode::WrongRange => Some((700_000, 1)),
         _ => None,
     };
-    if let Some((cut, times)) = drop_rule {
-        if n < times {
-            let first = Bytes::from(body_bytes[..cut.min(body_bytes.len())].to_vec());
-            let stream = futures_util::stream::iter(vec![
-                Ok::<Bytes, std::io::Error>(first),
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::ConnectionReset,
-                    "wifi dropped",
-                )),
-            ]);
-            return b.body(Body::from_stream(stream)).unwrap();
-        }
+    if let Some((cut, times)) = drop_rule
+        && n < times
+    {
+        let first = Bytes::from(body_bytes[..cut.min(body_bytes.len())].to_vec());
+        let stream = futures_util::stream::iter(vec![
+            Ok::<Bytes, std::io::Error>(first),
+            Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "wifi dropped",
+            )),
+        ]);
+        return b.body(Body::from_stream(stream)).unwrap();
     }
     b.body(Body::from(body_bytes)).unwrap()
 }
@@ -177,7 +177,7 @@ async fn setup(mode: Mode) -> Setup {
     }
 }
 
-async fn wait_done(s: &Setup) -> Result<String, DownloadInfo> {
+async fn wait_done(s: &Setup) -> Result<String, Box<DownloadInfo>> {
     for _ in 0..200 {
         if let Some(f) = s.done.lock().unwrap().first().cloned() {
             return Ok(f);
@@ -188,7 +188,7 @@ async fn wait_done(s: &Setup) -> Result<String, DownloadInfo> {
             .into_iter()
             .find(|d| d.status == DownloadStatus::Failed)
         {
-            return Err(fail);
+            return Err(Box::new(fail));
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }

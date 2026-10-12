@@ -262,10 +262,8 @@ impl App {
             (st.settings.clone(), changed, st.settings.model.clone())
         };
         self.save_settings(&s);
-        if changed {
-            if let Some(f) = file {
-                self.load(f);
-            }
+        if changed && let Some(f) = file {
+            self.load(f);
         }
     }
 
@@ -471,10 +469,8 @@ impl App {
             }
         }
         self.rescan();
-        if is_current {
-            if let Some(next) = self.pick_initial_model() {
-                self.load(next);
-            }
+        if is_current && let Some(next) = self.pick_initial_model() {
+            self.load(next);
         }
         r
     }
@@ -590,10 +586,9 @@ impl App {
             .models
             .iter()
             .find(|m| m.file == file)
+            && m.broken
         {
-            if m.broken {
-                return Err(UserError::model_corrupt(name));
-            }
+            return Err(UserError::model_corrupt(name));
         }
         let mut port_retries = 0;
         loop {
@@ -920,10 +915,10 @@ impl App {
     pub fn shutdown_blocking(&self) {
         self.inner.shutdown.cancel();
         self.stop_generation();
-        if let Ok(mut guard) = self.inner.server.try_lock() {
-            if let Some(mut s) = guard.take() {
-                s.stop();
-            }
+        if let Ok(mut guard) = self.inner.server.try_lock()
+            && let Some(mut s) = guard.take()
+        {
+            s.stop();
         }
     }
 

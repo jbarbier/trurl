@@ -155,11 +155,11 @@ impl<T: Read + Seek> Reader<T> {
                         n.checked_mul(2)
                             .ok_or(GgufError::Malformed("array".into()))?,
                     )?,
-                    4 | 5 | 6 => self.skip(
+                    4..=6 => self.skip(
                         n.checked_mul(4)
                             .ok_or(GgufError::Malformed("array".into()))?,
                     )?,
-                    10 | 11 | 12 => self.skip(
+                    10..=12 => self.skip(
                         n.checked_mul(8)
                             .ok_or(GgufError::Malformed("array".into()))?,
                     )?,

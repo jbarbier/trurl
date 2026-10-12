@@ -114,6 +114,20 @@ fn unpack(bytes: &[u8], dest: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Replace this process with the new version.
+pub fn restart(exe: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let err = std::process::Command::new(exe).exec();
+        eprintln!("Trurl was updated. Start it again. ({err})");
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = std::process::Command::new(exe).spawn();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -142,19 +156,5 @@ mod tests {
             std::fs::read_to_string(dest.join("llama/compat/llama-server")).unwrap(),
             "srv"
         );
-    }
-}
-
-/// Replace this process with the new version.
-pub fn restart(exe: &Path) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        let err = std::process::Command::new(exe).exec();
-        eprintln!("Trurl was updated. Start it again. ({err})");
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = std::process::Command::new(exe).spawn();
     }
 }

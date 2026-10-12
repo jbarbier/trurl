@@ -93,7 +93,9 @@ async fn install_update(app: AppHandle, d: Arc<Desktop>) -> Result<(), UserError
         *busy = true;
     }
     let result = async {
-        let update = match d.pending.lock().unwrap().take() {
+        // Take it out first: a lock guard must not live across the awaits below.
+        let pending = d.pending.lock().unwrap().take();
+        let update = match pending {
             Some(u) => u,
             None => {
                 check_update(&app, &d, true).await?;
@@ -189,10 +191,10 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("Trurl failed to start");
     app.run(|handle, event| {
-        if let RunEvent::Exit = event {
-            if let Some(d) = handle.try_state::<Arc<Desktop>>() {
-                d.core.shutdown_blocking();
-            }
+        if let RunEvent::Exit = event
+            && let Some(d) = handle.try_state::<Arc<Desktop>>()
+        {
+            d.core.shutdown_blocking();
         }
     });
 }

@@ -218,12 +218,11 @@ impl Hub {
             repo.split('/').map(urlencode).collect::<Vec<_>>().join("/"),
             d.revision
         );
-        if let Ok(resp) = self.get(url).timeout(Duration::from_secs(15)).send().await {
-            if resp.status().is_success() {
-                if let Ok(text) = resp.text().await {
-                    d.readme = Some(clean_readme(&text));
-                }
-            }
+        if let Ok(resp) = self.get(url).timeout(Duration::from_secs(15)).send().await
+            && resp.status().is_success()
+            && let Ok(text) = resp.text().await
+        {
+            d.readme = Some(clean_readme(&text));
         }
         Ok(d)
     }

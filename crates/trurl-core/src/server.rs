@@ -252,10 +252,10 @@ impl Server {
                 return Err(classify_exit(&self.log.tail(80), code));
             }
             // Refused (not listening yet) and 503 (loading) both mean "keep waiting".
-            if let Ok(r) = http.get(&url).timeout(Duration::from_secs(2)).send().await {
-                if r.status().is_success() {
-                    return Ok(());
-                }
+            if let Ok(r) = http.get(&url).timeout(Duration::from_secs(2)).send().await
+                && r.status().is_success()
+            {
+                return Ok(());
             }
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_millis(250)) => {}

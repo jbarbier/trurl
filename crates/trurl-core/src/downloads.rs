@@ -239,10 +239,10 @@ impl Downloads {
             .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
         {
             let mut map = self.inner.entries.lock().unwrap();
-            if let Some(e) = map.get(&id) {
-                if e.cancel.is_some() {
-                    return Ok(id); // already running
-                }
+            if let Some(e) = map.get(&id)
+                && e.cancel.is_some()
+            {
+                return Ok(id); // already running
             }
             let done = std::fs::metadata(self.part_path(&id))
                 .map(|m| m.len())
@@ -282,11 +282,11 @@ impl Downloads {
             e.info.clone()
         };
         let remaining = info.size.saturating_sub(info.done);
-        if let Some(free) = crate::hardware::free_space(&self.inner.dir) {
-            if free < remaining + remaining / 20 + 64 * 1024 * 1024 {
-                self.finish_with_error(id, UserError::disk_full());
-                return Err(UserError::disk_full());
-            }
+        if let Some(free) = crate::hardware::free_space(&self.inner.dir)
+            && free < remaining + remaining / 20 + 64 * 1024 * 1024
+        {
+            self.finish_with_error(id, UserError::disk_full());
+            return Err(UserError::disk_full());
         }
         let _ = std::fs::write(
             self.job_path(id),

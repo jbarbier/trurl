@@ -219,15 +219,17 @@ pub fn markdown(text: &str, width: usize, base: Style) -> Vec<Line<'static>> {
             }
             continue;
         }
-        if let Some((num, rest)) = t.split_once(". ") {
-            if !num.is_empty() && num.len() <= 3 && num.chars().all(|c| c.is_ascii_digit()) {
-                out.extend(wrap(
-                    inline(rest, base),
-                    width,
-                    Span::raw(format!("{pad}{num}. ")),
-                ));
-                continue;
-            }
+        if let Some((num, rest)) = t.split_once(". ")
+            && !num.is_empty()
+            && num.len() <= 3
+            && num.chars().all(|c| c.is_ascii_digit())
+        {
+            out.extend(wrap(
+                inline(rest, base),
+                width,
+                Span::raw(format!("{pad}{num}. ")),
+            ));
+            continue;
         }
         if t.starts_with('|') {
             out.push(Line::from(Span::styled(line.to_string(), base)));
@@ -302,10 +304,6 @@ impl Editor {
     pub fn clear(&mut self) {
         self.text.clear();
         self.cursor = 0;
-    }
-    pub fn take(&mut self) -> String {
-        self.cursor = 0;
-        std::mem::take(&mut self.text)
     }
 
     /// Lines to draw and the (column, row) of the cursor, wrapping at `width`.
@@ -469,7 +467,7 @@ mod tests {
         let (rows, cur) = e.layout(10);
         assert_eq!(rows, vec![">hélo", "next"]);
         assert_eq!(cur, (4, 1));
-        assert_eq!(e.take(), ">hélo\nnext");
+        e.clear();
         assert_eq!((e.text.as_str(), e.cursor), ("", 0));
     }
 

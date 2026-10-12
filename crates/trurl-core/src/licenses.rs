@@ -13,18 +13,18 @@ pub struct License {
 /// next to the app instead of inside the binary.
 fn third_party() -> String {
     let mut candidates = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.push(dir.join("licenses").join("THIRD-PARTY.txt"));
-            candidates.push(dir.join("..").join("licenses").join("THIRD-PARTY.txt"));
-            candidates.push(
-                dir.join("..")
-                    .join("share")
-                    .join("trurl")
-                    .join("licenses")
-                    .join("THIRD-PARTY.txt"),
-            );
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        candidates.push(dir.join("licenses").join("THIRD-PARTY.txt"));
+        candidates.push(dir.join("..").join("licenses").join("THIRD-PARTY.txt"));
+        candidates.push(
+            dir.join("..")
+                .join("share")
+                .join("trurl")
+                .join("licenses")
+                .join("THIRD-PARTY.txt"),
+        );
     }
     candidates.push(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../licenses/THIRD-PARTY.txt"),

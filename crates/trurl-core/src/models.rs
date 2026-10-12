@@ -205,10 +205,10 @@ pub fn import(src: &Path, dir: &Path, mut progress: impl FnMut(u64, u64)) -> Res
         progress(total, total);
         return Ok(safe);
     }
-    if let Some(free) = crate::hardware::free_space(dir) {
-        if free < total + total / 20 {
-            return Err(UserError::disk_full());
-        }
+    if let Some(free) = crate::hardware::free_space(dir)
+        && free < total + total / 20
+    {
+        return Err(UserError::disk_full());
     }
     let dest = unique_dest(dir, &safe);
     let part = dest.with_extension("gguf.part");

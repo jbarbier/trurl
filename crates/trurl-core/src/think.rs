@@ -53,20 +53,22 @@ impl ThinkSplitter {
                 continue;
             }
             // A closing tag with no opening tag: the prompt opened the thought.
-            if !self.in_think && !self.seen_open && !self.seen_close {
-                if let Some(i) = self.buf.find(CLOSE) {
-                    let before: String = self.buf[..i].to_string();
-                    self.buf.drain(..i + CLOSE.len());
-                    if self.emitted_answer {
-                        out.push(Piece::AnswerWasReasoning);
-                        self.emitted_answer = false;
-                    }
-                    if !before.is_empty() {
-                        out.push(Piece::Reasoning(before));
-                    }
-                    self.seen_close = true;
-                    continue;
+            if !self.in_think
+                && !self.seen_open
+                && !self.seen_close
+                && let Some(i) = self.buf.find(CLOSE)
+            {
+                let before: String = self.buf[..i].to_string();
+                self.buf.drain(..i + CLOSE.len());
+                if self.emitted_answer {
+                    out.push(Piece::AnswerWasReasoning);
+                    self.emitted_answer = false;
                 }
+                if !before.is_empty() {
+                    out.push(Piece::Reasoning(before));
+                }
+                self.seen_close = true;
+                continue;
             }
             // Keep back any tail that could be the start of a tag.
             let keep = partial_tag_suffix(

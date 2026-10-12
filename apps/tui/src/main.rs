@@ -366,11 +366,12 @@ async fn on_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: Key
         start_update(ui, core, tx);
         return;
     }
-    if let (Some('l' | 'L'), UpdateState::Available(u)) = (char_of(&k), &ui.update) {
-        if ui.screen == Screen::Chat && ui.input.text.is_empty() {
-            ui.update = UpdateState::Hidden(u.clone());
-            return;
-        }
+    if let (Some('l' | 'L'), UpdateState::Available(u)) = (char_of(&k), &ui.update)
+        && ui.screen == Screen::Chat
+        && ui.input.text.is_empty()
+    {
+        ui.update = UpdateState::Hidden(u.clone());
+        return;
     }
 
     match ui.screen {
@@ -410,10 +411,10 @@ fn char_of(k: &KeyEvent) -> Option<char> {
 }
 
 fn expand_home(p: &str) -> String {
-    if let Some(rest) = p.strip_prefix("~/") {
-        if let Some(h) = std::env::var_os("HOME") {
-            return format!("{}/{rest}", h.to_string_lossy());
-        }
+    if let Some(rest) = p.strip_prefix("~/")
+        && let Some(h) = std::env::var_os("HOME")
+    {
+        return format!("{}/{rest}", h.to_string_lossy());
     }
     p.to_string()
 }
@@ -601,33 +602,33 @@ fn open_hub(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>) {
 
 fn hub_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: KeyEvent) {
     // Downloads are controllable from every hub view.
-    if ui.hub_focus == HubFocus::Downloads {
-        if let Some(d) = ui.downloads.get(ui.dl_sel).cloned() {
-            match k.code {
-                KeyCode::Char('p') | KeyCode::Char('P') | KeyCode::Char(' ') => {
-                    if matches!(d.status, DownloadStatus::Paused | DownloadStatus::Failed) {
-                        if let Err(e) = core.download_resume(&d.id) {
-                            ui.notice = Some(e);
-                        }
-                    } else {
-                        core.download_pause(&d.id);
+    if ui.hub_focus == HubFocus::Downloads
+        && let Some(d) = ui.downloads.get(ui.dl_sel).cloned()
+    {
+        match k.code {
+            KeyCode::Char('p') | KeyCode::Char('P') | KeyCode::Char(' ') => {
+                if matches!(d.status, DownloadStatus::Paused | DownloadStatus::Failed) {
+                    if let Err(e) = core.download_resume(&d.id) {
+                        ui.notice = Some(e);
                     }
-                    return;
+                } else {
+                    core.download_pause(&d.id);
                 }
-                KeyCode::Char('x') | KeyCode::Char('X') => {
-                    core.download_cancel(&d.id);
-                    return;
-                }
-                KeyCode::Up => {
-                    ui.dl_sel = ui.dl_sel.saturating_sub(1);
-                    return;
-                }
-                KeyCode::Down => {
-                    ui.dl_sel = (ui.dl_sel + 1).min(ui.downloads.len().saturating_sub(1));
-                    return;
-                }
-                _ => {}
+                return;
             }
+            KeyCode::Char('x') | KeyCode::Char('X') => {
+                core.download_cancel(&d.id);
+                return;
+            }
+            KeyCode::Up => {
+                ui.dl_sel = ui.dl_sel.saturating_sub(1);
+                return;
+            }
+            KeyCode::Down => {
+                ui.dl_sel = (ui.dl_sel + 1).min(ui.downloads.len().saturating_sub(1));
+                return;
+            }
+            _ => {}
         }
     }
     if k.code == KeyCode::Tab {
