@@ -946,8 +946,10 @@ fn draw_hub_details(f: &mut Frame, ui: &Ui, area: Rect) {
 pub fn human_params(p: u64) -> String {
     if p >= 1_000_000_000 {
         format!("{:.1}B", p as f64 / 1e9)
-    } else {
+    } else if p >= 1_000_000 {
         format!("{}M", p / 1_000_000)
+    } else {
+        format!("{}K", (p / 1_000).max(1))
     }
 }
 
@@ -1150,4 +1152,14 @@ fn draw_prompt(f: &mut Frame, kind: PromptKind, ed: &crate::text::Editor, area: 
         parts[1],
     );
     f.set_cursor_position((parts[0].x + cur.0, parts[0].y + cur.1 - skip as u16));
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn parameter_counts() {
+        assert_eq!(super::human_params(751_632_384), "751M");
+        assert_eq!(super::human_params(3_880_099_328), "3.9B");
+        assert_eq!(super::human_params(292_096), "292K");
+    }
 }

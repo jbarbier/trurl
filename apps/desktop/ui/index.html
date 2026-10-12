@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trurl</title>
+  <link rel="icon" href="img/app-icon.svg">
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <!-- Learner controls -->
+    <aside class="side" id="side" aria-label="Chat settings">
+      <div class="side-top">
+        <span class="wordmark">Trurl</span>
+        <button class="btn btn-quiet" id="newChat" type="button" title="New chat (Ctrl+N)">
+          <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>
+          New chat <kbd>Ctrl+N</kbd>
+        </button>
+      </div>
+
+      <div class="side-scroll">
+        <section class="field" aria-labelledby="modelLabel">
+          <h2 class="field-label" id="modelLabel">Model</h2>
+          <button class="model-card" id="modelCard" type="button" aria-describedby="modelLabel"></button>
+        </section>
+
+        <section class="field">
+          <div class="field-row">
+            <label class="field-label" for="sysPrompt">System prompt</label>
+            <button class="link-btn" id="sysClear" type="button" hidden>Clear</button>
+          </div>
+          <textarea id="sysPrompt" rows="2" placeholder="Example: Answer in two short sentences."></textarea>
+          <p class="field-note" id="sysNote">Instructions the model follows in every answer.</p>
+        </section>
+
+        <section class="field">
+          <div class="field-row">
+            <label class="field-label" for="temp">Temperature</label>
+            <span class="field-row-end">
+              <button class="link-btn" id="tempReset" type="button" hidden>Reset</button>
+              <output class="num" id="tempOut" for="temp">0.7</output>
+            </span>
+          </div>
+          <input type="range" id="temp" min="0" max="2" step="0.1" value="0.7" aria-describedby="tempNote">
+          <p class="field-note" id="tempNote">Low: focused and repeatable. High: more varied.</p>
+        </section>
+
+        <section class="field">
+          <div class="field-row">
+            <label class="field-label" for="ctx">Context size</label>
+            <button class="link-btn" id="ctxReset" type="button" hidden>Reset</button>
+          </div>
+          <div class="select-wrap"><select id="ctx" aria-describedby="ctxNote"></select></div>
+          <p class="field-note" id="ctxNote">How much of the chat the model remembers. Changing it reloads the model.</p>
+        </section>
+      </div>
+
+      <button class="dl-chip" id="dlChip" type="button" hidden></button>
+      <nav class="side-foot" aria-label="Screens">
+        <button class="btn btn-quiet" id="openModels" type="button">
+          <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6.5 10 3l7 3.5-7 3.5zM3 10l7 3.5 7-3.5M3 13.5 10 17l7-3.5"/></svg>
+          Models
+        </button>
+        <button class="btn btn-quiet" id="openAbout" type="button">
+          <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M10 9v5M10 6.2v.1"/></svg>
+          About
+        </button>
+      </nav>
+    </aside>
+
+    <main class="main" id="main">
+      <header class="chat-head">
+        <button class="btn btn-quiet side-toggle" id="sideToggle" type="button" aria-controls="side" aria-expanded="false">Settings</button>
+        <h1 class="chat-title" id="chatTitle">Trurl</h1>
+        <span class="pill" id="pill"></span>
+      </header>
+
+      <div class="banners" id="banners"></div>
+
+      <div class="transcript-wrap">
+        <div class="transcript" id="transcript" tabindex="-1">
+          <div class="transcript-inner" id="turns" aria-label="Conversation"></div>
+        </div>
+        <button class="btn btn-secondary jump" id="jump" type="button" hidden>
+          <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M5 11l5 5 5-5"/></svg>
+          Jump to latest
+        </button>
+      </div>
+
+      <form class="composer" id="composer" autocomplete="off">
+        <div class="composer-box">
+          <label class="sr-only" for="input">Your message</label>
+          <textarea id="input" rows="1" placeholder="Type your question…"></textarea>
+          <button class="btn btn-primary send" id="send" type="submit">Send</button>
+        </div>
+        <p class="composer-note" id="composerNote"></p>
+      </form>
+    </main>
+  </div>
+
+  <div class="sr-only" id="live" aria-live="polite"></div>
+
+  <!-- Models -->
+  <dialog class="dlg dlg-wide" id="modelsDlg" aria-labelledby="modelsTitle">
+    <div class="dlg-head">
+      <h2 id="modelsTitle">Models</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close">
+        <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg>
+      </button>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Where the models are">
+      <button class="tab" role="tab" id="tabLocal" aria-controls="panelLocal" aria-selected="true" type="button">On this computer</button>
+      <button class="tab" role="tab" id="tabHub" aria-controls="panelHub" aria-selected="false" tabindex="-1" type="button">Hugging Face</button>
+    </div>
+    <div class="dlg-body">
+      <section class="downloads" id="downloads" aria-labelledby="dlTitle" hidden>
+        <h3 id="dlTitle">Downloads</h3>
+        <ul class="dl-list" id="dlList"></ul>
+      </section>
+      <div class="tabpanel" role="tabpanel" id="panelLocal" aria-labelledby="tabLocal">
+        <div class="local-head">
+          <div class="folder">
+            <span class="field-label">Models folder</span>
+            <span class="path" id="modelsDir"></span>
+          </div>
+          <button class="btn btn-secondary" type="button" data-open-folder>Open folder</button>
+          <button class="btn btn-primary" type="button" data-import>Import model</button>
+        </div>
+        <div class="import-slot"></div>
+        <ul class="model-list" id="modelList"></ul>
+      </div>
+      <div class="tabpanel" role="tabpanel" id="panelHub" aria-labelledby="tabHub" hidden></div>
+    </div>
+  </dialog>
+
+  <!-- About -->
+  <dialog class="dlg" id="aboutDlg" aria-labelledby="aboutTitle">
+    <div class="dlg-head">
+      <h2 id="aboutTitle">About Trurl</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close">
+        <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg>
+      </button>
+    </div>
+    <div class="dlg-body" id="aboutBody"></div>
+  </dialog>
+
+  <!-- Hidden settings (Ctrl+Shift+S) -->
+  <dialog class="dlg dlg-small" id="tokenDlg" aria-labelledby="tokenTitle">
+    <div class="dlg-head">
+      <h2 id="tokenTitle">Hugging Face access token</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close">
+        <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg>
+      </button>
+    </div>
+    <form class="dlg-body token-form" id="tokenForm" autocomplete="off">
+      <p>You only need a token to download models marked “Needs an account”. Trurl sends it only to huggingface.co.</p>
+      <p class="token-state" id="tokenState"></p>
+      <label class="field-label" for="tokenInput">Access token</label>
+      <input type="password" id="tokenInput" placeholder="hf_…" spellcheck="false">
+      <div class="dlg-actions">
+        <button class="btn btn-secondary" type="button" id="tokenRemove">Remove</button>
+        <button class="btn btn-primary" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Confirm -->
+  <dialog class="dlg dlg-small" id="confirmDlg" aria-labelledby="confirmTitle" aria-describedby="confirmText">
+    <div class="dlg-body confirm">
+      <h2 id="confirmTitle"></h2>
+      <p id="confirmText"></p>
+      <div class="dlg-actions">
+        <button class="btn btn-secondary" type="button" value="cancel" id="confirmCancel">Cancel</button>
+        <button class="btn btn-primary" type="button" value="ok" id="confirmOk"></button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="vendor/marked.umd.js"></script>
+  <script src="vendor/purify.min.js"></script>
+  <script src="mock.js"></script>
+  <script src="api.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

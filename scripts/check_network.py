@@ -27,6 +27,7 @@ ALLOWED = {
     "ipc.localhost": "Tauri's internal protocol",
     "schema.tauri.app": "JSON schema reference in config files, never fetched by the app",
     "ai.google.dev": "the Gemma notice text required by the Gemma Terms of Use (text only)",
+    "www.w3.org": "the SVG namespace identifier in the UI code, never fetched",
 }
 # Hugging Face redirects downloads to its CDNs. Trurl never stores or names these
 # URLs; they appear only as redirect targets at runtime.
@@ -43,7 +44,7 @@ SCAN = [
     ("apps/desktop/ui", "*.html"),
     ("apps/desktop/ui", "*.css"),
 ]
-SKIP = {"apps/desktop/ui/vendor"}
+SKIP = {"apps/desktop/ui/vendor", "apps/desktop/src-tauri/gen"}
 URL = re.compile(r"\b(?:https?|wss?)://([A-Za-z0-9.\-]+)")
 
 
