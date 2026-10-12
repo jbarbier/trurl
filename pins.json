@@ -11,21 +11,14 @@
     "build": "b11429",
     "commit": "d81235049384534c167caea52b85a694f6103d14",
     "license": "MIT",
-    "assets": {
-      "windows-x64": {
-        "file": "llama-b11429-bin-win-cpu-x64.zip",
-        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/llama-b11429-bin-win-cpu-x64.zip",
-        "sha256": "1283323272b04cd07905816a597a0da810918102de958f4ff6f7bbaa70ed2efe"
-      },
-      "linux-x64": {
-        "file": "llama-b11429-bin-ubuntu-x64.tar.gz",
-        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/llama-b11429-bin-ubuntu-x64.tar.gz",
-        "sha256": "f6d25dde8f51133143d1453da4fd5f73b145127177612a283bf7995957af3392"
-      }
+    "source": {
+      "url": "https://github.com/ggml-org/llama.cpp/archive/d81235049384534c167caea52b85a694f6103d14.tar.gz",
+      "sha256": "6b58785f0a82898f4c3442417ff962e2d4b231b1bee5d033902ad90b27901e14"
     },
-    "cpu_variants": {
-      "avx2": ["haswell", "skylakex", "icelake", "alderlake", "cannonlake", "cascadelake", "cooperlake", "sapphirerapids", "zen4"],
-      "compat": ["x64", "sse42", "sandybridge", "ivybridge", "piledriver"]
+    "variants": {
+      "avx2": "AVX2 + FMA + F16C + BMI2 (Haswell, 2013, and newer)",
+      "avx": "AVX only (Sandy Bridge and Ivy Bridge, 2011-2012)",
+      "compat": "any x86-64 CPU (SSE2)"
     }
   },
   "models": [
@@ -91,5 +84,9 @@
       "license": "OFL-1.1",
       "sha256": "811e11966d29f3a01fcb19b087b61ac067d380665a55aebb7fcdf2cda95e4a93"
     }
-  ]
+  ],
+  "build_tools": {
+    "cmake": "3.31.6",
+    "ninja": "1.12.1"
+  }
 }

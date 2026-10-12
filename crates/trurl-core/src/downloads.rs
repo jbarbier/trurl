@@ -414,16 +414,20 @@ impl Downloads {
         };
         let resp = resp.map_err(|e| UserError::download_failed().with_detail(e.to_string()))?;
         let status = resp.status().as_u16();
-        let mut start = have;
-        match status {
+        let start: u64 = match status {
             206 => {
                 let cr = resp.headers().get(reqwest::header::CONTENT_RANGE).and_then(|v| v.to_str().ok()).unwrap_or("");
                 match content_range_start(cr) {
-                    Some(s) if s == have => {}
-                    _ => start = 0, // not what we asked for: start over
+                    // The server may start earlier than asked: write from where it says.
+                    Some(s) if s <= have => s,
+                    // Later than asked, or unreadable: we would leave a hole. Start over.
+                    _ => {
+                        std::fs::write(&part, b"").map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
+                        return Err(UserError::download_failed().with_detail(format!("unexpected Content-Range {cr:?}")));
+                    }
                 }
             }
-            200 => start = 0,
+            200 => 0,
             416 => {
                 if info.size > 0 && have >= info.size {
                     return Ok(());
@@ -434,7 +438,7 @@ impl Downloads {
             401 | 403 => return Err(UserError::hub_gated(&info.repo).with_detail(format!("HTTP {status}"))),
             404 => return Err(UserError::hub_failed().with_detail(format!("HTTP 404 for {url}"))),
             _ => return Err(UserError::download_failed().with_detail(format!("HTTP {status}"))),
-        }
+        };
         let mut f = std::fs::OpenOptions::new()
             .create(true)
             .write(true)

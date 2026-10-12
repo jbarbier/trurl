@@ -272,8 +272,23 @@ impl App {
         self.inner.paths.models()
     }
 
+    /// The detected build, capped by an earlier illegal-instruction crash, and
+    /// lowered to the best build actually installed.
     fn variant_locked(&self, s: &Settings) -> CpuVariant {
-        if s.force_compat { CpuVariant::Compat } else { self.inner.hw.variant }
+        let mut v = self.inner.hw.variant;
+        if let Some(cap) = s.max_variant {
+            v = v.min(cap);
+        }
+        if let Some(root) = &self.inner.llama_root {
+            let mut cur = Some(v);
+            while let Some(c) = cur {
+                if root.join(c.dir_name()).join(crate::paths::server_exe_name()).is_file() {
+                    return c;
+                }
+                cur = c.fallback();
+            }
+        }
+        v
     }
 
     // ----- models ------------------------------------------------------------
@@ -517,11 +532,11 @@ impl App {
                         return Err(UserError::server_start());
                     }
                     match kind {
-                        ExitKind::IllegalInstruction if variant == CpuVariant::Avx2 => {
-                            // This CPU cannot run the fast build after all: remember and fall back.
+                        ExitKind::IllegalInstruction if variant.fallback().is_some() => {
+                            // This CPU cannot run this build after all: remember and step down.
                             let s = {
                                 let mut st = self.inner.state.lock().unwrap();
-                                st.settings.force_compat = true;
+                                st.settings.max_variant = variant.fallback();
                                 st.settings.clone()
                             };
                             let _ = s.save(&self.inner.paths.settings());

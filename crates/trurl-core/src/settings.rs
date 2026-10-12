@@ -23,8 +23,8 @@ pub struct Settings {
     pub model: Option<String>,
     /// Optional Hugging Face token for gated models. Sent only to huggingface.co.
     pub hf_token: String,
-    /// Set after llama-server crashed with an illegal instruction on the AVX2 build.
-    pub force_compat: bool,
+    /// Highest llama-server build allowed, lowered after an illegal-instruction crash.
+    pub max_variant: Option<crate::hardware::CpuVariant>,
 }
 
 impl Default for Settings {
@@ -35,7 +35,7 @@ impl Default for Settings {
             context_size: DEFAULT_CONTEXT,
             model: None,
             hf_token: String::new(),
-            force_compat: false,
+            max_variant: None,
         }
     }
 }

@@ -46,7 +46,8 @@ pub fn scan(dir: &Path, total_ram: u64, verified: &VerifiedCache) -> Vec<ModelIn
         if file.to_ascii_lowercase().starts_with("mmproj") || GgufInfo::is_secondary_split(&file) {
             continue;
         }
-        let Ok(meta) = e.metadata() else { continue };
+        // Follow symlinks: a teacher may link a model instead of copying it.
+        let Ok(meta) = std::fs::metadata(&p) else { continue };
         if !meta.is_file() {
             continue;
         }

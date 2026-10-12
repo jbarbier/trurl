@@ -1,0 +1,79 @@
+/* Cyberiad Labs design tokens, from the Cyberiad Labs design system
+   (palette generated and contrast-checked upstream; do not hand-edit values).
+   Light theme only, like the public site. Every UI file uses these names and
+   nothing else: no new colours, no fourth radius, no second easing curve. */
+
+:root {
+  --ink: #121418;
+  --ink2: #484A53;
+  --ink3: #696B74;
+  --edge: #9194A0;
+  --hair: #DADCE3;
+  --sunk: #ECEDF3;
+  --far: #F9FAFD;
+  --paper: #F4F6FA;
+  --near: #FFFFFF;
+  --onk: #D4D6DC;
+  --onk2: #AFB1B8;
+  --ink-lift: #26282E;
+  --grid1: #E5E7EB;
+  --grid2: #E6E8FA;
+  --ink-08: rgba(18, 20, 24, 0.08);
+  --ink-24: rgba(18, 20, 24, 0.24);
+  --ink-40: rgba(18, 20, 24, 0.4);
+  --on-ink-14: rgba(255, 255, 255, 0.14);
+
+  /* Action: fills and focus only (#5955FF is 3:1 on white, never body text). */
+  --a: #5955FF;
+  --a-f: #FFFFFF;
+  /* Type, borders, button face. */
+  --a-d: #5954FE;
+  /* Press shadow. */
+  --a-p: #3A19CD;
+  --a-s: #CFD7FF;
+  --a-t: #F1F4FF;
+  --a-e: #C3CCFE;
+
+  /* States. held = success/green, rev = needs attention/orange, take = error/red,
+     sched = info/blue, done = accepted/teal. */
+  --held: #00D179; --held-d: #007F47; --held-p: #00522C; --held-s: #ACEAC1; --held-t: #E8FAED; --held-e: #ACDEBC;
+  --done: #00CBC3; --done-d: #007C77; --done-p: #00504D; --done-s: #94ECE5; --done-t: #E2FBF8; --done-e: #99DFD9;
+  --rev: #FDA200; --rev-d: #9B6200; --rev-p: #673F00; --rev-s: #FED09C; --rev-t: #FFF2E4; --rev-e: #EEC89E;
+  --take: #FF3534; --take-d: #E00018; --take-p: #99000D; --take-s: #FFCBC4; --take-t: #FFF1EF; --take-e: #FABFB7;
+  --sched: #008EFE; --sched-d: #006FC8; --sched-p: #004885; --sched-s: #BEDCFF; --sched-t: #EDF5FF; --sched-e: #AFD3FD;
+  /* Secondary hue, usable anywhere (cyan). */
+  --c8: #00C6EF; --c8-d: #007892; --c8-p: #004D5F; --c8-s: #9AE7FF; --c8-t: #E5F8FF; --c8-e: #9BDBEF;
+
+  /* Hard shadow offsets: control, row, card, section plate, commitment plate. */
+  --o1: 4px; --o2: 6px; --o3: 8px; --o4: 10px; --o5: 12px;
+  /* Three radii only: plates, controls, small chrome. */
+  --r: 12px; --r-s: 9px; --r-x: 6px;
+  --rail: 6px;
+  --bw: 1px;
+  /* The one soft shadow, only ever under a hard one. */
+  --drop: 0 28px 40px -28px var(--ink-40);
+  --ease: cubic-bezier(.22, .68, .36, 1);
+  --cyb-ink: var(--ink);
+  --cyb-accent: #5954FE;
+  --sa: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mo: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  color-scheme: light;
+}
+
+/* Sora sets the wordmark and nothing else. Self-hosted (OFL), never fetched. */
+@font-face {
+  font-family: "Sora";
+  font-style: normal;
+  font-weight: 500 600;
+  font-display: swap;
+  src: url("fonts/sora-latin.woff2") format("woff2");
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

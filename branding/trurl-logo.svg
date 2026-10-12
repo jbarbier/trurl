@@ -1,0 +1,7 @@
+<!-- PLACEHOLDER logo. Replace this file with the final Trurl logo (keep the name). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 72" role="img" aria-label="Trurl">
+  <rect x="0" y="8" width="56" height="56" rx="12" fill="#121418"/>
+  <rect x="12" y="22" width="32" height="8" rx="4" fill="#F4F5F3"/>
+  <rect x="24" y="22" width="8" height="30" rx="4" fill="#5954FE"/>
+  <text x="70" y="52" font-family="Sora, system-ui, sans-serif" font-weight="600" font-size="40" letter-spacing="-0.4" fill="#121418">Trurl</text>
+</svg>

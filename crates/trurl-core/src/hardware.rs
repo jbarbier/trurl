@@ -2,20 +2,33 @@
 
 use serde::Serialize;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// Which llama-server build to run. Ordered from slowest to fastest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CpuVariant {
-    /// llama.cpp CPU backends that need AVX2 (Haswell, 2013, and newer).
-    Avx2,
-    /// Backends that run on any x86-64 CPU.
+    /// Any x86-64 CPU (SSE2).
     Compat,
+    /// AVX, no AVX2: Sandy Bridge and Ivy Bridge (2011-2012), common in second-hand laptops.
+    Avx,
+    /// AVX2 + FMA + F16C + BMI2: Haswell (2013) and newer.
+    Avx2,
 }
 
 impl CpuVariant {
     pub fn dir_name(self) -> &'static str {
         match self {
             CpuVariant::Avx2 => "avx2",
+            CpuVariant::Avx => "avx",
             CpuVariant::Compat => "compat",
+        }
+    }
+
+    /// The next slower build, used after an illegal-instruction crash.
+    pub fn fallback(self) -> Option<CpuVariant> {
+        match self {
+            CpuVariant::Avx2 => Some(CpuVariant::Avx),
+            CpuVariant::Avx => Some(CpuVariant::Compat),
+            CpuVariant::Compat => None,
         }
     }
 }
@@ -57,9 +70,17 @@ impl CpuFeatures {
         }
     }
 
-    /// llama.cpp's "haswell" CPU backend, the lowest of the AVX2 builds, needs all five.
+    /// The fastest build this CPU can run. `is_x86_feature_detected!` also checks
+    /// that the OS saves AVX registers, so an AVX CPU on an OS without support
+    /// correctly falls to Compat.
     pub fn variant(self) -> CpuVariant {
-        if self.avx && self.avx2 && self.fma && self.f16c && self.bmi2 { CpuVariant::Avx2 } else { CpuVariant::Compat }
+        if self.avx && self.avx2 && self.fma && self.f16c && self.bmi2 {
+            CpuVariant::Avx2
+        } else if self.avx {
+            CpuVariant::Avx
+        } else {
+            CpuVariant::Compat
+        }
     }
 }
 
@@ -175,21 +196,35 @@ mod tests {
     }
 
     #[test]
-    fn variant_needs_all_five_features() {
+    fn variant_tiers() {
         let all = CpuFeatures { avx: true, avx2: true, fma: true, f16c: true, bmi2: true };
         assert_eq!(all.variant(), CpuVariant::Avx2);
-        for i in 0..5 {
+        for i in 1..5 {
             let mut f = all;
             match i {
-                0 => f.avx = false,
                 1 => f.avx2 = false,
                 2 => f.fma = false,
                 3 => f.f16c = false,
                 _ => f.bmi2 = false,
             }
-            assert_eq!(f.variant(), CpuVariant::Compat, "missing feature {i}");
+            assert_eq!(f.variant(), CpuVariant::Avx, "missing feature {i}");
         }
+        // Sandy Bridge: AVX only.
+        let sandy = CpuFeatures { avx: true, ..Default::default() };
+        assert_eq!(sandy.variant(), CpuVariant::Avx);
+        // Core 2, early Atom, Pentium: nothing.
         assert_eq!(CpuFeatures::default().variant(), CpuVariant::Compat);
+        // AVX2 bits without AVX (OS has AVX disabled) cannot run either AVX build.
+        let no_os_avx = CpuFeatures { avx: false, ..all };
+        assert_eq!(no_os_avx.variant(), CpuVariant::Compat);
+    }
+
+    #[test]
+    fn fallback_chain() {
+        assert_eq!(CpuVariant::Avx2.fallback(), Some(CpuVariant::Avx));
+        assert_eq!(CpuVariant::Avx.fallback(), Some(CpuVariant::Compat));
+        assert_eq!(CpuVariant::Compat.fallback(), None);
+        assert!(CpuVariant::Compat < CpuVariant::Avx && CpuVariant::Avx < CpuVariant::Avx2);
     }
 
     #[test]
