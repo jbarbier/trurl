@@ -95,24 +95,46 @@ def scan(exe: Path, std_hits: Counter | None = None, other_hits: Counter | None 
     standard library functions go there instead (see main)."""
     counts: Counter = Counter()
     tool = os.environ.get("OBJDUMP", "objdump")  # llvm-objdump works too (Windows CI)
-    proc = subprocess.Popen([tool, "-d", "--no-show-raw-insn", str(exe)], stdout=subprocess.PIPE, text=True, errors="replace")
+    # In object mode, with relocations: they show which functions read
+    # `__isa_available`, the variable Microsoft's compiler checks before running
+    # a loop it vectorized for a newer CPU (see `dispatched` below).
+    cmd = [tool, "-d", "--no-show-raw-insn"] + (["-r"] if std_hits is not None else []) + [str(exe)]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True, errors="replace")
     assert proc.stdout
     symbol = ""
+    pending: Counter = Counter()  # hits in the current function, not yet classified
+    guarded = False
+
+    def flush():
+        # A function that reads __isa_available picks its instructions at run
+        # time: its hits are listed, not failed. Everything else counts.
+        for name, n in pending.items():
+            if std_hits is not None and (guarded or is_std(symbol)):
+                std_hits[(symbol, name)] += n
+            else:
+                counts[name] += n
+                if other_hits is not None:
+                    other_hits[(symbol, name)] += n
+        pending.clear()
+
     for line in proc.stdout:
         m = SYMBOL.match(line)
         if m:
-            symbol = m.group(1)
+            # Microsoft's compiler names the blocks inside a function `$LN<n>`:
+            # they belong to the function above them.
+            if not m.group(1).startswith("$LN"):
+                flush()
+                symbol, guarded = m.group(1), False
+            continue
+        if "__isa_available" in line:
+            guarded = True
             continue
         if "\tv" not in line and "mm" not in line and "popcnt" not in line and "crc32" not in line:
             continue
         for name, rx in PATTERNS.items():
             if rx.search(line):
-                if std_hits is not None and is_std(symbol):
-                    std_hits[(symbol, name)] += 1
-                else:
-                    counts[name] += 1
-                    if other_hits is not None:
-                        other_hits[(symbol, name)] += 1
+                pending[name] += 1
+    flush()
     proc.wait()
     return counts
 
@@ -144,11 +166,31 @@ SELF_TEST = [
 ]
 
 
+# Object mode: SSSE3 code in a function that checks `__isa_available` first
+# (as Microsoft's compiler does) is listed, not failed; without the check it fails.
+DISPATCH_TEST = """extern int __isa_available;
+void guarded(void) { if (__isa_available > 1) __asm__ volatile("pshufb %xmm1, %xmm0"); }
+void unguarded(void) { __asm__ volatile("pshufb %xmm1, %xmm0"); }
+"""
+
+
 def self_test() -> int:
     import tempfile
 
     bad = 0
     with tempfile.TemporaryDirectory() as tmp:
+        src, obj = Path(tmp, "dispatch.c"), Path(tmp, "dispatch.o")
+        src.write_text(DISPATCH_TEST)
+        subprocess.run(["gcc", "-O2", "-c", "-msse2", str(src), "-o", str(obj)], check=True)
+        listed, failed = Counter(), Counter()
+        c = scan(obj, listed, failed)
+        listed_fns = {sym for (sym, _k) in listed}
+        failed_fns = {sym for (sym, _k) in failed}
+        if c["ssse3"] and "unguarded" in failed_fns and "guarded" in listed_fns and "guarded" not in failed_fns:
+            print(f"ok   self-test run-time dispatch: listed {sorted(listed_fns)}, failed {sorted(failed_fns)}")
+        else:
+            bad += 1
+            print(f"FAIL self-test run-time dispatch: listed {sorted(listed_fns)}, failed {sorted(failed_fns)}, counts {dict(c)}")
         for name, flags, code, expect in SELF_TEST:
             src, obj = Path(tmp, name + ".c"), Path(tmp, name + ".o")
             src.write_text(code + "\n")
@@ -209,7 +251,7 @@ def main() -> int:
         if object_mode and std_hits:
             names = sorted({sym for (sym, kind) in std_hits if kind in forbidden})
             if names:
-                print(f"note {variant}: C/C++ runtime code with run-time CPU checks: {', '.join(names[:6])}")
+                print(f"note {variant}: code that checks the CPU at run time (C runtime, loops vectorized behind __isa_available): {', '.join(names[:8])}")
         if found:
             bad += 1
             print(f"FAIL {variant}: uses {found}  ({summary})")
