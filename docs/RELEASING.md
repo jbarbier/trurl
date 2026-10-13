@@ -9,7 +9,7 @@ itself. This page is how you ship one.
 
 | They run | They download | What changes |
 |---|---|---|
-| Desktop app (Windows) | `Trurl_<v>_x64-setup.exe` (about 12 MB), checked against the updater key | The app is replaced. Models and settings stay. |
+| Desktop app (Windows) | `Trurl_<v>_x64-setup.exe` (about 15 MB), checked against the updater key | The app is replaced. Models and settings stay. |
 | Terminal app (Linux) | `trurl-<v>-linux-x64.tar.gz`, checked against the same key | The app folder is swapped. Models and settings stay. |
 
 Both read one manifest:

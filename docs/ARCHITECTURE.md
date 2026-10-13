@@ -349,7 +349,7 @@ so the models cannot live inside the `.exe`. They should not anyway: the same
 installer is what the updater downloads, and learners must not download 3.8 GB of
 models for an update.
 
-- **Update installer**, `Trurl_<v>_x64-setup.exe` (12 MB): installs per user, no
+- **Update installer**, `Trurl_<v>_x64-setup.exe` (15 MB): installs per user, no
   admin. It downloads WebView2 only if Windows lacks it.
 - **USB package**, built by `scripts/make_usb_bundle.py`:
   - `Trurl_<v>_x64-offline-setup.exe`, which embeds the WebView2 offline installer;

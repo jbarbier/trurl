@@ -52,7 +52,7 @@ stick's `models` folder. No administrator password is needed. To make the stick,
 
 | Computer | Download | Then |
 |---|---|---|
-| Windows 10 or 11 (64-bit) | `Trurl_<version>_x64-setup.exe` (12 MB) | Double-click. Then download models from inside Trurl, or import them. |
+| Windows 10 or 11 (64-bit) | `Trurl_<version>_x64-setup.exe` (15 MB) | Double-click. Then download models from inside Trurl, or import them. |
 
 Trurl needs 64-bit Windows. Many older laptops were set up with 32-bit Windows 10: to
 check, open **Settings**, **System**, **About**, and read **System type**.
@@ -230,9 +230,9 @@ If a computer cannot run the engine Trurl picked, Trurl moves down a level by it
 Gemma 3 4B needs about 2.8 GB: easy with 8 GB, possible with 4 GB if every other app
 is closed. No graphics card is needed.
 
-**Disk:** about 70 MB for Trurl on Linux and about 35 MB installed on Windows, plus
-the models: 0.5 to 2.5 GB each. The Windows installer is 12 MB; the USB installer is
-227 MB because it carries WebView2 for computers that lack it.
+**Disk:** about 70 MB for Trurl on Linux and about 44 MB installed on Windows, plus
+the models: 0.5 to 2.5 GB each. The Windows installer is 15 MB; the USB installer is
+230 MB because it carries WebView2 for computers that lack it.
 
 ## Benchmarks
 
@@ -254,7 +254,7 @@ to run it offline. Method and raw numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.
 - **Uses nothing while it waits:** 0% CPU between questions.
 - **Memory** is within a few percent for all three: almost all of it is the model.
 - **The Windows window** (printed by the Windows smoke test in CI, after one answer
-  with Gemma 3 1B): llama-server about 940 MB with the model mapped (about 280 MB
+  with Gemma 3 1B): llama-server about 870 MB with the model mapped (about 205 MB
   of it private), Microsoft's WebView2 about 300 MB (about 110 MB private: its
   libraries are shared with Edge), `trurl.exe` about 25 MB. The window costs about
   115 MB of private memory on top of the model.
