@@ -7,6 +7,7 @@
 //   update    an update is offered a few seconds after start
 //   chat      a conversation already on screen, with reasoning
 //   oldcpu    a 2008 laptop (SSSE3 engine): Hugging Face recommends Q4_0 files
+//   coursestates  each course row state: damaged, failed download, a look-alike file
 // Timings are short but real enough to see streaming and loading states.
 
 (function () {
@@ -20,9 +21,15 @@
     const err = (code, title, hint) => ({ code, title, hint });
 
     const models = [
-      { file: "gemma-3-1b-it-Q4_K_M.gguf", name: "Gemma 3 1B Instruct", quant: "Q4_K_M", size: 806058240, fit: "green", bundled: true, verified: true, broken: false, has_chat_template: true, reasoning_hint: false, train_context: 32768 },
-      { file: "Qwen_Qwen3-0.6B-Q4_K_M.gguf", name: "Qwen3 0.6B", quant: "Q4_K_M", size: 484220320, fit: "green", bundled: true, verified: true, broken: false, has_chat_template: true, reasoning_hint: true, train_context: 40960 },
-      { file: "gemma-3-4b-it-Q4_K_M.gguf", name: "Gemma 3 4B Instruct", quant: "Q4_K_M", size: 2489757856, fit: "orange", bundled: true, verified: true, broken: false, has_chat_template: true, reasoning_hint: false, train_context: 131072 },
+      { file: "gemma-3-1b-it-Q4_K_M.gguf", name: "Gemma 3 1B Instruct", quant: "Q4_K_M", size: 806058240, fit: "green", bundled: true, course: true, verified: true, broken: false, has_chat_template: true, reasoning_hint: false, train_context: 32768 },
+      { file: "Qwen_Qwen3-0.6B-Q4_K_M.gguf", name: "Qwen3 0.6B", quant: "Q4_K_M", size: 484220320, fit: "green", bundled: true, course: true, verified: true, broken: false, has_chat_template: true, reasoning_hint: true, train_context: 40960 },
+      { file: "gemma-3-4b-it-Q4_K_M.gguf", name: "Gemma 3 4B Instruct", quant: "Q4_K_M", size: 2489757856, fit: "orange", bundled: true, course: false, verified: true, broken: false, has_chat_template: true, reasoning_hint: false, train_context: 131072 },
+    ];
+    // As pins.json: the three models the course uses, in course order.
+    const COURSE = [
+      { id: "gemma-3-1b-it", name: "Gemma 3 1B Instruct", note: "The model you use for the whole course.", file: "gemma-3-1b-it-Q4_K_M.gguf", size: 806058240, fit: "green", repo: "ggml-org/gemma-3-1b-it-GGUF" },
+      { id: "gemma-3-1b-pt", name: "Gemma 3 1B PT", note: "Optional. The same model before it was taught to answer: it continues your text and does not stop by itself, so you stop it.", file: "gemma-3-1b-pt.Q4_K_M.gguf", size: 806056864, fit: "green", repo: "mradermacher/gemma-3-1b-pt-GGUF" },
+      { id: "qwen3-0.6b", name: "Qwen3 0.6B", note: "A model trained to think before it answers. You watch its thinking as it writes.", file: "Qwen_Qwen3-0.6B-Q4_K_M.gguf", size: 484220320, fit: "green", repo: "bartowski/Qwen_Qwen3-0.6B-GGUF" },
     ];
     const state = {
       version: "0.1.0",
@@ -35,6 +42,7 @@
       turns: [],
       generating: false,
       downloads: [],
+      course_models: COURSE.map(({ repo, ...c }) => ({ ...c, download_id: (repo + c.file).replace(/\W/g, "").slice(-16) })),
     };
     let nextTurn = 1;
     let cancel = null;
@@ -153,6 +161,20 @@
       state.downloads = [...dl.values()].map((d) => ({ ...d }));
       emit({ type: "downloads", downloads: state.downloads });
     };
+    // Every course row state at once: a damaged Gemma 3 1B, a failed PT download,
+    // another file named like Qwen3 0.6B, and a checked non-course model.
+    if (scenario === "coursestates") {
+      state.models = [
+        { ...models[0], broken: true, verified: false },
+        { ...models[1], size: 123456789, bundled: false, course: false, verified: null, name: "Some other Qwen" },
+        models[2],
+      ];
+      state.settings.model = null;
+      const c = COURSE[1];
+      const ptId = (c.repo + c.file).replace(/\W/g, "").slice(-16);
+      dl.set(ptId, { id: ptId, repo: c.repo, file: c.file, revision: "pinned", dest_file: c.file, size: c.size, sha256: "pinned", done: c.size / 3, rate: 0, status: "failed", error: err("download_failed", "The download stopped.", "Check the connection, then try again.") });
+      state.downloads = [...dl.values()].map((d) => ({ ...d }));
+    }
     function runDownload(d) {
       d.status = "running";
       d.error = null;
@@ -180,7 +202,8 @@
             pushDownloads();
             const name = d.dest_file;
             if (!modelBy(name)) {
-              state.models.push({ file: name, name: name.replace(".gguf", "").replace(/[_-]/g, " "), quant: d.quant || null, size: d.size, fit: "green", bundled: false, verified: null, broken: false, has_chat_template: true, reasoning_hint: true, train_context: 32768 });
+              const c = COURSE.find((x) => x.file === name);
+              state.models.push({ file: name, name: c ? c.name : name.replace(".gguf", "").replace(/[_-]/g, " "), quant: d.quant || null, size: d.size, fit: "green", bundled: !!c, course: !!c, verified: null, broken: false, has_chat_template: true, reasoning_hint: true, train_context: 32768 });
               emit({ type: "models", models: snap().models });
               if (state.engine.state === "idle") load(name);
             }
@@ -266,6 +289,15 @@
         runDownload(d);
         return id;
       },
+      download_course_model: ({ id }) => {
+        const c = COURSE.find((x) => x.id === id);
+        if (!c) throw new Error("no course model " + id);
+        const here = modelBy(c.file);
+        if (here && here.size === c.size) return Promise.reject(err("download_failed", "This model is already on this computer.", "Choose it in Models. To download it again, delete it there first."));
+        const id2 = commands.download_start({ repo: c.repo, file: c.file, revision: "pinned", size: c.size, sha256: "pinned" });
+        dl.get(id2).quant = "Q4_K_M";
+        return id2;
+      },
       download_pause: ({ id }) => {
         const d = dl.get(id);
         if (d) {
@@ -317,7 +349,7 @@
           { id: nextTurn++, user: "Where is Accra?", reasoning: "", answer: ANSWERS.default, model: "Gemma 3 1B Instruct", status: "done", thought_ms: null },
         ];
         emit({ type: "snapshot", snapshot: snap() });
-      } else if (state.models.length) {
+      } else if (state.models.length && state.settings.model) {
         load(state.settings.model);
       }
       if (scenario === "update") later(2500, () => emit({ type: "update_available", update: { version: "0.2.0", notes: "Faster model loading.\nClearer error when a model is too big.", date: "2026-11-02" } }));

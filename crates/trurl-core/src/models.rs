@@ -19,8 +19,11 @@ pub struct ModelInfo {
     pub quant: Option<String>,
     pub size: u64,
     pub fit: RamFit,
-    /// Shipped with Trurl and checked against its pinned SHA-256.
+    /// Name and size match a model in pins.json (from the USB stick or a download);
+    /// its SHA-256 is then checked once, see `verified`.
     pub bundled: bool,
+    /// One of the course models (pins.json `course`), this exact file.
+    pub course: bool,
     /// Some(true) once the SHA-256 matched the pin, Some(false) if it did not.
     pub verified: Option<bool>,
     /// The header could not be read: the file is damaged or not a model.
@@ -97,6 +100,7 @@ fn describe(
         size,
         fit: ram_fit(size, total_ram),
         bundled,
+        course: bundled && pin.is_some_and(|p| p.course.is_some()),
         verified: v,
         broken: broken || v == Some(false),
         has_chat_template: gguf.as_ref().map(|g| g.has_chat_template).unwrap_or(false),

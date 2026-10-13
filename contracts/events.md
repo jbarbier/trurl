@@ -28,6 +28,7 @@ All commands are asynchronous. A command that fails rejects with a `UserError`
 | `hub_search` | `{ query }` | `RepoHit[]` |
 | `hub_details` | `{ repo }` | `RepoDetails` |
 | `download_start` | `{ repo, file, revision, size, sha256 }` | download id |
+| `download_course_model` | `{ id }` (a `course_models` id) | download id. The core uses the pinned repo, commit, file, size and SHA-256; nothing comes from the UI |
 | `download_pause` / `download_resume` / `download_cancel` | `{ id }` | |
 | `set_hf_token` | `{ token }` | |
 | `licenses` | | `{ name, text }[]` |
@@ -71,16 +72,20 @@ EngineState { state: "idle" }
             | { state: "loading", file, name }
             | { state: "ready", file, name, context }
             | { state: "failed", file, name, error }
-ModelInfo   { file, name, quant?, size, fit: "green"|"orange"|"red", bundled, verified?,
+ModelInfo   { file, name, quant?, size, fit: "green"|"orange"|"red", bundled, course, verified?,
               broken, has_chat_template, reasoning_hint, train_context? }
+              bundled: name and size match a pinned model (pins.json); course: also a course model
 Turn        { id, user, reasoning, answer, model, status, thought_ms?, error?,
               system_prompt, temperature, context }   (the settings it was written with)
               status: "streaming" | "done" | "stopped" | "cut" | "error"
 Settings    { system_prompt, temperature, context_size, model?, has_hf_token,
               default_temperature, default_context, context_choices[] }
 Snapshot    { version, llama_build, models_dir, hardware{ total_ram, physical_cores, threads,
-              cpu_name, variant }, settings, models[], engine, turns[], generating, downloads[] }
+              cpu_name, variant }, settings, models[], engine, turns[], generating, downloads[],
+              course_models[] }
               variant: "avx2"|"avx"|"ssse3"|"compat", the llama-server build for this processor
+CourseModel { id, name, note, file, size, fit, download_id }   the course models in course order, fixed
+              per version. download_id: the id of its pinned download; match downloads on it, not on file
 RepoHit     { id, downloads, likes, gated, updated?, chat? }
               chat: false = this model does not chat (embeddings, speech, rerankers)
 RepoDetails { id, author?, revision, gated, license?, downloads, likes, updated?, base_model?,

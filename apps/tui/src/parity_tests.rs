@@ -200,6 +200,7 @@ fn models_show_size_and_how_well_they_fit_in_memory() {
         size,
         fit,
         bundled: true,
+        course: false,
         verified: Some(true),
         broken: false,
         has_chat_template: true,
@@ -219,6 +220,8 @@ fn models_show_size_and_how_well_they_fit_in_memory() {
         "Tight fit",
         "Too big",
         "806 MB",
+        // Same file as the pin, hash checked (USB or download alike).
+        "checked by Trurl",
     ] {
         assert!(s.contains(want), "missing {want:?}: {s}");
     }
@@ -443,5 +446,370 @@ fn the_files_legend_says_why_q4_0_is_recommended_only_where_it_is_faster() {
     assert!(
         s.contains("The recommended one, Q4_K_M, is listed first."),
         "{s}"
+    );
+}
+
+// ----- Course models ------------------------------------------------------------
+
+fn course_ui() -> Ui {
+    let mut ui = Ui::new();
+    ready(&mut ui);
+    ui.screen = Screen::Hub;
+    ui.hub_view = HubView::Search;
+    ui.course_models = trurl_core::pins::course_models()
+        .map(|m| trurl_core::events::CourseModel {
+            id: m.id.clone(),
+            name: m.name.clone(),
+            note: m.course.clone().unwrap(),
+            file: m.file.clone(),
+            size: m.size,
+            fit: RamFit::Green,
+            download_id: trurl_core::downloads::download_id(&m.repo, &m.file, &m.revision),
+        })
+        .collect();
+    // Gemma 3 1B is here and in use; the other two are not.
+    let g = &ui.course_models[0];
+    ui.models = vec![ModelInfo {
+        file: g.file.clone(),
+        name: g.name.clone(),
+        quant: Some("Q4_K_M".into()),
+        size: g.size,
+        fit: RamFit::Green,
+        bundled: true,
+        course: true,
+        verified: Some(true),
+        broken: false,
+        has_chat_template: true,
+        reasoning_hint: false,
+        train_context: Some(32768),
+        gguf: None,
+    }];
+    ui.engine = EngineState::Ready {
+        file: g.file.clone(),
+        name: g.name.clone(),
+        context: 2048,
+    };
+    ui.hub_focus = ui.hub_start_focus();
+    ui
+}
+
+#[test]
+fn the_course_models_come_first_on_the_hugging_face_screen() {
+    let mut ui = course_ui();
+    assert_eq!(ui.hub_focus, HubFocus::Course, "a course model is missing");
+    ui.course_sel = 1;
+    for (w, h) in [(80, 24), (120, 30)] {
+        let s = flat(&screen(&ui, w, h));
+        for want in [
+            "For the course",
+            "Gemma 3 1B Instruct",
+            "◆ in use",
+            "› Gemma 3 1B PT",
+            "Enter downloads it",
+            "Qwen3 0.6B",
+            "not downloaded yet",
+            "Gemma 3 1B PT: Optional. The same model before it was taught to answer",
+            "Search Hugging Face",
+            "Enter download",
+        ] {
+            assert!(s.contains(want), "{w}x{h} missing {want:?}: {s}");
+        }
+        let a = s.find("For the course").unwrap();
+        let b = s.find("Search Hugging Face").unwrap();
+        assert!(a < b, "the course list is above the search");
+    }
+}
+
+#[test]
+fn a_course_model_downloading_shows_its_progress_and_all_here_opens_on_search() {
+    let mut ui = course_ui();
+    let q = ui.course_models[2].clone();
+    let mut d: trurl_core::downloads::DownloadInfo = serde_json::from_value(serde_json::json!({
+        "id": q.download_id, "repo": "r", "file": q.file, "revision": "x", "dest_file": q.file,
+        "size": 1000, "sha256": null, "done": 420, "status": "running"
+    }))
+    .unwrap();
+    d.rate = 0;
+    ui.downloads = vec![d];
+    let s = flat(&screen(&ui, 80, 24));
+    assert!(s.contains("downloading 42%"), "{s}");
+
+    // Every course model here: the screen opens on the search box, as before.
+    for c in ui.course_models.clone() {
+        let mut m = ui.models[0].clone();
+        m.file = c.file;
+        ui.models.push(m);
+    }
+    assert_eq!(ui.hub_start_focus(), HubFocus::Input);
+}
+
+#[test]
+fn offline_the_course_list_says_how_to_get_the_missing_ones() {
+    let mut ui = course_ui();
+    ui.hub_view = HubView::Offline;
+    ui.hub_focus = HubFocus::Input;
+    let s = flat(&screen(&ui, 80, 24));
+    assert!(s.contains("For the course"), "{s}");
+    assert!(
+        s.contains("Connect to the internet to download them, or press I in Models (F2)"),
+        "{s}"
+    );
+    assert!(
+        s.contains("Connect to the internet to browse Hugging Face"),
+        "{s}"
+    );
+    assert!(
+        !s.contains("Enter downloads it"),
+        "nothing to download offline: {s}"
+    );
+}
+
+#[test]
+fn search_results_still_scroll_to_the_selection_under_the_course_list() {
+    let mut ui = course_ui();
+    ui.hub_focus = HubFocus::Results;
+    ui.hub_results = (0..30)
+        .map(|i| trurl_core::hub::RepoHit {
+            id: format!("someone/model-{i:02}-GGUF"),
+            downloads: 1,
+            likes: 1,
+            gated: false,
+            updated: None,
+            chat: Some(true),
+        })
+        .collect();
+    ui.hub_sel = 25;
+    let s = flat(&screen(&ui, 80, 24));
+    assert!(s.contains("› someone/model-25-GGUF"), "{s}");
+}
+
+#[test]
+fn the_models_screen_marks_course_models() {
+    let mut ui = course_ui();
+    ui.screen = Screen::Models;
+    let s = flat(&screen(&ui, 100, 30));
+    assert!(s.contains("course model"), "{s}");
+    assert!(
+        !s.contains("checked by Trurl"),
+        "a course model says course model: {s}"
+    );
+}
+
+/// Keys on the course list, against a real core: Enter downloads exactly the
+/// pinned file; Down from the last one and typing both go to the search box.
+#[tokio::test]
+async fn enter_on_a_course_model_downloads_the_pinned_file() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let home = tempfile::tempdir().unwrap();
+    let paths = trurl_core::paths::Paths::at(home.path());
+    std::fs::create_dir_all(paths.models()).unwrap();
+    let core = trurl_core::app::App::start(
+        trurl_core::app::AppConfig {
+            paths,
+            llama_root: None,
+            // Nothing listens here: the download just waits to retry.
+            hf_base: "http://127.0.0.1:9".into(),
+            user_agent: "trurl-test".into(),
+        },
+        std::sync::Arc::new(|_| {}),
+    );
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut ui = course_ui();
+    ui.course_sel = 0;
+    let key = |c| KeyEvent::new(c, KeyModifiers::NONE);
+
+    // Gemma 3 1B is here and in use: nothing starts.
+    crate::hub_key(&mut ui, &core, &tx, key(KeyCode::Enter));
+    assert!(core.downloads_list().is_empty());
+    assert!(
+        ui.update_msg
+            .as_deref()
+            .unwrap_or("")
+            .contains("is the model in use"),
+        "{:?}",
+        ui.update_msg
+    );
+
+    crate::hub_key(&mut ui, &core, &tx, key(KeyCode::Down));
+    crate::hub_key(&mut ui, &core, &tx, key(KeyCode::Down));
+    crate::hub_key(&mut ui, &core, &tx, key(KeyCode::Enter));
+    let pin = trurl_core::pins::course_models().nth(2).unwrap();
+    let d = core.downloads_list();
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(
+        (
+            d[0].repo.as_str(),
+            d[0].revision.as_str(),
+            d[0].dest_file.as_str()
+        ),
+        (pin.repo.as_str(), pin.revision.as_str(), pin.file.as_str())
+    );
+    assert_eq!(d[0].sha256.as_deref(), Some(pin.sha256.as_str()));
+
+    crate::hub_key(&mut ui, &core, &tx, key(KeyCode::Down));
+    assert_eq!(ui.hub_focus, HubFocus::Input);
+    crate::hub_key(&mut ui, &core, &tx, key(KeyCode::Up));
+    assert_eq!(ui.hub_focus, HubFocus::Course);
+    crate::hub_key(&mut ui, &core, &tx, key(KeyCode::Char('q')));
+    assert_eq!(ui.hub_focus, HubFocus::Input);
+    assert_eq!(ui.hub_query.text, "q");
+    core.shutdown().await;
+}
+
+#[test]
+fn the_course_list_starts_on_the_first_missing_model() {
+    let ui = course_ui();
+    assert_eq!(
+        ui.first_missing_course(),
+        Some(1),
+        "Gemma 3 1B is here, the PT is not"
+    );
+}
+
+#[test]
+fn a_failed_download_a_damaged_file_and_a_look_alike_each_say_what_to_do() {
+    let mut ui = course_ui();
+    // The PT download failed.
+    let pt = ui.course_models[1].clone();
+    let d: trurl_core::downloads::DownloadInfo = serde_json::from_value(serde_json::json!({
+        "id": pt.download_id, "repo": "r", "file": pt.file, "revision": "x", "dest_file": pt.file,
+        "size": 1000, "sha256": null, "done": 420, "status": "failed",
+        "error": { "code": "download_failed", "title": "The download stopped.", "hint": "Try again." }
+    }))
+    .unwrap();
+    ui.downloads = vec![d];
+    // Qwen3: a different file with the same name.
+    let q = ui.course_models[2].clone();
+    let mut other = ui.models[0].clone();
+    other.file = q.file.clone();
+    other.course = false;
+    other.bundled = false;
+    ui.models.push(other);
+    ui.course_sel = 1;
+    let s = flat(&screen(&ui, 120, 30));
+    assert!(
+        s.contains("failed: The download stopped. Enter tries again."),
+        "{s}"
+    );
+    assert!(s.contains("another file has this name"), "{s}");
+    assert!(ui.course_clash(&q));
+    // Gemma 3 1B damaged.
+    ui.models[0].broken = true;
+    let s = flat(&screen(&ui, 120, 30));
+    assert!(s.contains("damaged file"), "{s}");
+}
+
+#[test]
+fn a_paused_course_download_says_paused_and_the_key_bar_matches_each_row() {
+    let mut ui = course_ui();
+    let pt = ui.course_models[1].clone();
+    let d: trurl_core::downloads::DownloadInfo = serde_json::from_value(serde_json::json!({
+        "id": pt.download_id, "repo": "r", "file": pt.file, "revision": "x", "dest_file": pt.file,
+        "size": 1000, "sha256": null, "done": 420, "status": "paused"
+    }))
+    .unwrap();
+    ui.downloads = vec![d];
+    let s = flat(&screen(&ui, 80, 24));
+    assert!(s.contains("paused at 42%"), "{s}");
+    assert!(!s.contains("downloading 42%"), "{s}");
+    // Key bar: in use -> no Enter; paused -> no Enter; missing -> download.
+    for (sel, want) in [(0, None), (1, None), (2, Some("download"))] {
+        ui.course_sel = sel;
+        assert_eq!(ui.course_enter(), want, "row {sel}");
+    }
+    ui.course_sel = 2;
+    let s = flat(&screen(&ui, 80, 24));
+    assert!(s.contains("Enter download"), "{s}");
+}
+
+#[test]
+fn the_whole_note_fits_at_80_by_24_even_with_a_failed_row() {
+    let mut ui = course_ui();
+    let pt = ui.course_models[1].clone();
+    let d: trurl_core::downloads::DownloadInfo = serde_json::from_value(serde_json::json!({
+        "id": pt.download_id, "repo": "r", "file": pt.file, "revision": "x", "dest_file": pt.file,
+        "size": 1000, "sha256": null, "done": 420, "status": "failed",
+        "error": { "code": "download_failed", "title": "The download stopped.", "hint": "Try again." }
+    }))
+    .unwrap();
+    ui.downloads = vec![d];
+    ui.course_sel = 1;
+    let s = flat(&screen(&ui, 80, 24));
+    assert!(
+        s.contains("so you stop it."),
+        "the end of the note is cut: {s}"
+    );
+    assert_eq!(ui.course_enter(), Some("try again"));
+}
+
+#[tokio::test]
+async fn tab_goes_course_list_search_box_downloads_and_back() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let home = tempfile::tempdir().unwrap();
+    let paths = trurl_core::paths::Paths::at(home.path());
+    std::fs::create_dir_all(paths.models()).unwrap();
+    let core = trurl_core::app::App::start(
+        trurl_core::app::AppConfig {
+            paths,
+            llama_root: None,
+            hf_base: "http://127.0.0.1:9".into(),
+            user_agent: "trurl-test".into(),
+        },
+        std::sync::Arc::new(|_| {}),
+    );
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut ui = course_ui();
+    let tab = KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE);
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(ui.hub_focus, HubFocus::Course);
+    crate::hub_key(&mut ui, &core, &tx, tab);
+    assert_eq!(ui.hub_focus, HubFocus::Input);
+    crate::hub_key(&mut ui, &core, &tx, tab);
+    assert_eq!(
+        ui.hub_focus,
+        HubFocus::Course,
+        "no results, no downloads: back to the list"
+    );
+
+    // Two downloads; Enter on the PT again selects ITS download, not the first.
+    ui.course_sel = 1;
+    crate::hub_key(&mut ui, &core, &tx, enter);
+    ui.course_sel = 2;
+    crate::hub_key(&mut ui, &core, &tx, enter);
+    ui.downloads = core.downloads_list();
+    assert_eq!(ui.downloads.len(), 2);
+    ui.hub_focus = HubFocus::Course;
+    ui.dl_sel = 0;
+    ui.course_sel = 1;
+    crate::hub_key(&mut ui, &core, &tx, enter);
+    assert_eq!(ui.hub_focus, HubFocus::Downloads);
+    assert_eq!(ui.downloads[ui.dl_sel].dest_file, ui.course_models[1].file);
+    crate::hub_key(&mut ui, &core, &tx, tab);
+    assert_eq!(
+        ui.hub_focus,
+        HubFocus::Course,
+        "from Downloads, Tab goes back to the list"
+    );
+    core.shutdown().await;
+}
+
+#[test]
+fn a_search_download_of_another_commit_is_not_the_course_download() {
+    let mut ui = course_ui();
+    let q = ui.course_models[2].clone();
+    // Same file name, found by searching, but not the pinned commit.
+    let d: trurl_core::downloads::DownloadInfo = serde_json::from_value(serde_json::json!({
+        "id": "not-the-pin", "repo": "bartowski/Qwen_Qwen3-0.6B-GGUF", "file": q.file,
+        "revision": "0000000000000000000000000000000000000000", "dest_file": q.file,
+        "size": 1000, "sha256": null, "done": 420, "status": "failed"
+    }))
+    .unwrap();
+    ui.downloads = vec![d];
+    assert!(ui.course_download(&q).is_none());
+    ui.course_sel = 2;
+    assert_eq!(
+        ui.course_enter(),
+        Some("download"),
+        "Enter fetches the pinned file, never resumes the other one"
     );
 }

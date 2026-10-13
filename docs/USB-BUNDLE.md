@@ -2,7 +2,7 @@
 
 Classrooms often have no internet, so Trurl is handed out on USB sticks: one
 installer plus the models. Nothing has to be downloaded on the learners' computers.
-One person makes the stick once, on a computer with internet (about 3.9 GB to
+One person makes the stick once, on a computer with internet (about 4.8 GB to
 download), then copies it to as many sticks as needed.
 
 ## What is on the stick
@@ -11,9 +11,10 @@ download), then copies it to as many sticks as needed.
 Trurl-0.1.0-USB/
 ├── Trurl_0.1.0_x64-offline-setup.exe   ← learners double-click this
 ├── models/                             ← the AI models (GGUF files)
-│   ├── gemma-3-1b-it-Q4_K_M.gguf      806 MB
-│   ├── gemma-3-4b-it-Q4_K_M.gguf      2.5 GB
-│   └── Qwen_Qwen3-0.6B-Q4_K_M.gguf    484 MB
+│   ├── gemma-3-1b-it-Q4_K_M.gguf      806 MB   course
+│   ├── gemma-3-1b-pt.Q4_K_M.gguf      806 MB   course (optional exercise, 1.1.2)
+│   ├── Qwen_Qwen3-0.6B-Q4_K_M.gguf    484 MB   course
+│   └── gemma-3-4b-it-Q4_K_M.gguf      2.5 GB
 ├── linux/                              (only with --linux)
 ├── LICENSES/                           Gemma Terms of Use and every other license
 ├── READ-ME-FIRST.txt                   instructions for whoever holds the stick
@@ -22,7 +23,7 @@ Trurl-0.1.0-USB/
 
 **Why a folder and not one big installer?** A Windows installer cannot be bigger than
 2 GB, and the Gemma 3 4B model alone is 2.5 GB. The installer is also what Trurl
-downloads when it updates itself, and nobody should download 3.8 GB of models for an
+downloads when it updates itself, and nobody should download 4.6 GB of models for an
 update.
 
 **What the installer does with the `models` folder.** It copies every model file
@@ -46,10 +47,10 @@ window), for Windows 10 computers that do not have it yet. Windows 11 always has
 1. **A copy of this repository.** On GitHub, click **Code**, then **Download ZIP**.
    Unzip it, and open a terminal (PowerShell on Windows) in that folder.
 2. **Python 3.10 or newer.** The command is `python` on Windows and `python3` on Linux.
-3. **About 7.6 GB of free disk:** 3.8 GB for the models (kept in a cache folder for
-   next time) plus 3.8 GB for the finished folder.
-4. **Internet for the first run:** about 3.9 GB to download, once.
-5. **Sticks of 8 GB or more** for the full folder (3.8 GB). For 4 GB sticks, leave out
+3. **About 9.4 GB of free disk:** 4.6 GB for the models (kept in a cache folder for
+   next time) plus 4.8 GB for the finished folder.
+4. **Internet for the first run:** about 4.8 GB to download, once.
+5. **Sticks of 8 GB or more** for the full folder (4.8 GB). For 4 GB sticks, leave out
    Gemma 3 4B (see below). FAT32 and exFAT sticks both work, since no file is over 4 GB.
 
 ### Build it
@@ -95,11 +96,15 @@ Get-Content SHA256SUMS.txt | % { $h,$f = $_ -split '  ',2; if ((Get-FileHash $f)
 
 ## Choose the models
 
-- **A smaller stick** with only the two small models (1.3 GB), for 4 GB sticks or
+- **A smaller stick** with only the three course models (2.1 GB), for 4 GB sticks or
   4 GB laptops:
   ```
-  python3 scripts/make_usb_bundle.py --only gemma-3-1b-it,qwen3-0.6b
+  python3 scripts/make_usb_bundle.py --only gemma-3-1b-it,gemma-3-1b-pt,qwen3-0.6b
   ```
+  The installer copies every model on the stick to each computer. To spare small
+  disks the optional Gemma 3 1B PT (806 MB), leave it out too:
+  `--only gemma-3-1b-it,qwen3-0.6b` (1.3 GB). Learners who want it later download it
+  in one click under **For the course**.
 - **One more model**, from any GGUF chat model file you have:
   ```
   python3 scripts/make_usb_bundle.py --extra-model path/to/model.gguf

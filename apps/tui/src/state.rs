@@ -5,7 +5,9 @@ use std::collections::HashSet;
 use trurl_core::chat::{Turn, TurnStatus};
 use trurl_core::downloads::DownloadInfo;
 use trurl_core::errors::UserError;
-use trurl_core::events::{EngineState, Event, HardwareSummary, PublicSettings, Snapshot};
+use trurl_core::events::{
+    CourseModel, EngineState, Event, HardwareSummary, PublicSettings, Snapshot,
+};
 use trurl_core::hub::{RepoFiles, RepoHit};
 use trurl_core::models::ModelInfo;
 use trurl_core::update::UpdateInfo;
@@ -74,6 +76,8 @@ pub enum HubView {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HubFocus {
+    /// The course models, above the search.
+    Course,
     Input,
     Results,
     Files,
@@ -100,6 +104,8 @@ pub struct Ui {
     pub turns: Vec<Turn>,
     pub generating: bool,
     pub downloads: Vec<DownloadInfo>,
+    /// The models the course uses (pins.json), first on the Hugging Face screen.
+    pub course_models: Vec<CourseModel>,
 
     pub screen: Screen,
     pub input: Editor,
@@ -126,6 +132,7 @@ pub struct Ui {
     pub hub_file_sel: usize,
     pub hub_readme_scroll: u16,
     pub dl_sel: usize,
+    pub course_sel: usize,
 
     pub about_scroll: u16,
     pub license_sel: usize,
@@ -164,6 +171,7 @@ impl Ui {
             turns: Vec::new(),
             generating: false,
             downloads: Vec::new(),
+            course_models: Vec::new(),
             screen: Screen::Chat,
             input: Editor::default(),
             scroll: 0,
@@ -185,6 +193,7 @@ impl Ui {
             hub_file_sel: 0,
             hub_readme_scroll: 0,
             dl_sel: 0,
+            course_sel: 0,
             about_scroll: 0,
             license_sel: 0,
             license_open: None,
@@ -210,6 +219,66 @@ impl Ui {
         self.turns = s.turns;
         self.generating = s.generating;
         self.downloads = s.downloads;
+        self.course_models = s.course_models;
+    }
+
+    /// The model in the folder that is this course model's exact pinned file.
+    pub fn course_model_here(&self, c: &CourseModel) -> Option<&ModelInfo> {
+        self.models.iter().find(|m| m.file == c.file && m.course)
+    }
+
+    /// Its download, while one is under way.
+    pub fn course_download(&self, c: &CourseModel) -> Option<&DownloadInfo> {
+        // Its pinned download only: a search download of another commit can share the name.
+        self.downloads.iter().find(|d| {
+            d.id == c.download_id && d.status != trurl_core::downloads::DownloadStatus::Done
+        })
+    }
+
+    /// A different file under a course model's name (imported, or from another repo).
+    pub fn course_clash(&self, c: &CourseModel) -> bool {
+        self.course_model_here(c).is_none() && self.models.iter().any(|m| m.file == c.file)
+    }
+
+    /// Where the Hugging Face screen starts: on the first missing course model,
+    /// otherwise in the search box.
+    pub fn hub_start_focus(&self) -> HubFocus {
+        if self.first_missing_course().is_some() {
+            HubFocus::Course
+        } else {
+            HubFocus::Input
+        }
+    }
+
+    pub fn first_missing_course(&self) -> Option<usize> {
+        self.course_models
+            .iter()
+            .position(|c| self.course_model_here(c).is_none())
+    }
+
+    /// What Enter does on the selected course model, for the key bar; None when
+    /// it only explains (in use, damaged, another file with its name, downloading).
+    pub fn course_enter(&self) -> Option<&'static str> {
+        let c = self.course_models.get(self.course_sel)?;
+        if let Some(m) = self.course_model_here(c) {
+            return (!m.broken && self.running_file() != Some(m.file.as_str())).then_some("use");
+        }
+        if self.course_clash(c) {
+            return None;
+        }
+        match self.course_download(c).map(|d| d.status) {
+            Some(trurl_core::downloads::DownloadStatus::Failed) => Some("try again"),
+            Some(_) => None,
+            None => Some("download"),
+        }
+    }
+
+    /// The file the engine runs or loads: what "in use" means on every screen.
+    pub fn running_file(&self) -> Option<&str> {
+        match &self.engine {
+            EngineState::Ready { file, .. } | EngineState::Loading { file, .. } => Some(file),
+            _ => None,
+        }
     }
 
     pub fn apply(&mut self, e: Event) {

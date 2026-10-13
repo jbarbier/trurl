@@ -33,7 +33,7 @@ WHAT IS ON THIS STICK
 
   Trurl_..._x64-offline-setup.exe   the Windows installer
   linux/              the terminal version for Linux
-  models/             Gemma 3 1B Instruct (806 MB), Gemma 3 4B Instruct (2.5 GB), Qwen3 0.6B (484 MB)
+  models/             Gemma 3 1B Instruct (806 MB), Gemma 3 1B PT (806 MB), Qwen3 0.6B (484 MB), Gemma 3 4B Instruct (2.5 GB)
   LICENSES/           Gemma Terms of Use and every other license
   SHA256SUMS.txt      to check that a copy is complete
 

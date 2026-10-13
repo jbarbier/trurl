@@ -120,6 +120,9 @@ pub async fn dispatch(app: &App, cmd: &str, args: Value) -> Result<Value, UserEr
             })
             .map(|id| json!(id))
         }
+        "download_course_model" => app
+            .download_course_model(&arg::<Id>(&args)?.id)
+            .map(|id| json!(id)),
         "download_pause" => {
             app.download_pause(&arg::<Id>(&args)?.id);
             ok()

@@ -36,6 +36,10 @@ pub struct ModelPin {
     pub license: String,
     pub license_file: String,
     pub default: bool,
+    /// Set for the models the course uses: one line saying what it is for. These
+    /// are offered first, as one-click downloads of exactly this file.
+    #[serde(default)]
+    pub course: Option<String>,
 }
 
 pub const PINS_JSON: &str = include_str!("../../../pins.json");
@@ -56,6 +60,11 @@ pub fn default_model() -> Option<&'static ModelPin> {
     pins().models.iter().find(|m| m.default)
 }
 
+/// The course models, in the order the course meets them (their order in pins.json).
+pub fn course_models() -> impl Iterator<Item = &'static ModelPin> {
+    pins().models.iter().filter(|m| m.course.is_some())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -69,6 +78,20 @@ mod tests {
         for m in &p.models {
             assert_eq!(m.sha256.len(), 64, "{}", m.file);
             assert_eq!(m.revision.len(), 40, "{}", m.file);
+        }
+    }
+
+    #[test]
+    fn the_course_models_are_the_three_the_course_names() {
+        // Course sessions 1.1.1 (Gemma 3 1B), 1.1.2 (its pre-trained twin) and
+        // 1.2.3 (Qwen3 0.6B). The default model is always one of them.
+        let ids: Vec<&str> = course_models().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["gemma-3-1b-it", "gemma-3-1b-pt", "qwen3-0.6b"]);
+        assert!(default_model().unwrap().course.is_some());
+        for m in course_models() {
+            let note = m.course.as_deref().unwrap();
+            assert!(!note.is_empty() && note.len() < 160, "{}: {note}", m.id);
+            assert!(!note.contains('—'), "{}: no em dashes", m.id);
         }
     }
 

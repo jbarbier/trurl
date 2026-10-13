@@ -292,15 +292,20 @@ A small cloud computer (2 AMD EPYC cores with AVX2), 2 threads, 7.8 GB RAM, no G
 version: the model engine, the models and every library are pinned (below).
 
 **Hand it out on USB sticks.** [docs/USB-BUNDLE.md](docs/USB-BUNDLE.md) explains how
-to make one, with the three models, and how to add your own.
+to make one, with the course models and Gemma 3 4B, and how to add your own.
+
+**The course models, without searching.** The Hugging Face screen starts with
+**For the course**: Gemma 3 1B, its pre-trained twin Gemma 3 1B PT, and Qwen3 0.6B,
+each one click away, pinned to the exact file the course was written with. A learner
+never has to pick between look-alike files in a search.
 
 **The course exercises, in Trurl:**
 
 | Exercise | In Trurl |
 |---|---|
 | Temperature 0 gives the same answer twice | Slide temperature to 0.0. |
-| A pre-trained model that never stops (1.1.2) | Import its `.gguf`; it runs without a chat template; **Stop** ends it. |
-| Watch thinking live, stop it (1.2.3, 1.3.4) | Pick Qwen3 0.6B. It can think for minutes: 1 to 3 on the 2-core test machine (a recent processor), several times longer on a 2006 to 2010 laptop (use the Q4_0 file there, see [docs/USB-BUNDLE.md](docs/USB-BUNDLE.md#a-stick-for-2006-to-2010-laptops)). **Stop** or **Esc** at any moment. |
+| A pre-trained model that never stops (1.1.2) | **Models**, **Hugging Face**, **For the course**: download Gemma 3 1B PT. It runs without a chat template; **Stop** ends it. |
+| Watch thinking live, stop it (1.2.3, 1.3.4) | Pick Qwen3 0.6B (on the stick, or under **For the course**). It can think for minutes: 1 to 3 on the 2-core test machine (a recent processor), several times longer on a 2006 to 2010 laptop (use the Q4_0 file there, see [docs/USB-BUNDLE.md](docs/USB-BUNDLE.md#a-stick-for-2006-to-2010-laptops)). **Stop** or **Esc** at any moment. |
 | `/no_think` (1.3.4, 1.4.3) | Type it in the message; the thinking block stays empty. |
 | Run out of context (1.3.2) | Set **Context size** to 256, the smallest. llama.cpp rounds any context up to a multiple of 256, so the course's 200 behaves exactly like 256. |
 | Paste a whole web page (1.4.3) | Set **Context size** to 4,096 first: 2,048 tokens is about 1,500 words. |
@@ -332,11 +337,14 @@ table honest.
 
 | Included model | File | SHA-256 (start) | Size |
 |---|---|---|---|
-| Gemma 3 1B Instruct (default) | `gemma-3-1b-it-Q4_K_M.gguf` from `ggml-org/gemma-3-1b-it-GGUF` | `8ccc5cd1f1b36025` | 806 MB |
+| Gemma 3 1B Instruct (default, course) | `gemma-3-1b-it-Q4_K_M.gguf` from `ggml-org/gemma-3-1b-it-GGUF` | `8ccc5cd1f1b36025` | 806 MB |
+| Gemma 3 1B PT (course) | `gemma-3-1b-pt.Q4_K_M.gguf` from `mradermacher/gemma-3-1b-pt-GGUF` | `caf1c278f8a8ba1e` | 806 MB |
 | Gemma 3 4B Instruct | `gemma-3-4b-it-Q4_K_M.gguf` from `ggml-org/gemma-3-4b-it-GGUF` | `882e8d2db44dc554` | 2.49 GB |
-| Qwen3 0.6B | `Qwen_Qwen3-0.6B-Q4_K_M.gguf` from `bartowski/Qwen_Qwen3-0.6B-GGUF` | `9acfc1e001311f34` | 484 MB |
+| Qwen3 0.6B (course) | `Qwen_Qwen3-0.6B-Q4_K_M.gguf` from `bartowski/Qwen_Qwen3-0.6B-GGUF` | `9acfc1e001311f34` | 484 MB |
 
-Each model is pinned to a Hugging Face commit, a size and a full SHA-256.
+Each model is pinned to a Hugging Face commit, a size and a full SHA-256. The three
+marked "course" (the `course` line in `pins.json`) are listed first on the Hugging Face
+screen, under **For the course**: one click downloads exactly that file and checks it.
 
 ## Build, test, release
 
