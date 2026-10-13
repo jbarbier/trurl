@@ -43,6 +43,13 @@ All team members use multi-factor authentication on GitHub and on SignPath.
 Trurl runs language models on your own computer. Your messages, your settings and your
 models stay on it. Trurl has no account, no analytics and no tracking.
 
+**Your chats are saved on this computer only.** Every conversation (your questions, the
+answers and the settings used) is kept in Trurl's data folder
+(`%LOCALAPPDATA%\CyberiadLabs\Trurl\chats` on Windows, `~/.local/share/trurl/chats` on
+Linux) so you can open it again later. It is never sent anywhere. To remove them:
+**Chats**, then **Delete** on one chat or **Delete all chats** (in the terminal app: F9,
+then D or A). On a shared computer, delete them before you leave.
+
 Trurl connects to the internet only in these cases:
 
 - **Update check (on by default, can be turned off).** Once after it starts and then
