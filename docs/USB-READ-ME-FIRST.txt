@@ -1,0 +1,46 @@
+TRURL ON A USB STICK
+====================
+
+This stick installs Trurl and its AI models. No internet is needed.
+
+ON A WINDOWS 10 OR 11 COMPUTER
+
+1. Double-click Trurl_..._x64-offline-setup.exe
+2. If Windows says "Windows protected your PC", click "More info", then
+   "Run anyway". (This message shows for new programs that are not signed yet.)
+   If Windows 11 says Smart App Control blocked it, there is no "Run anyway".
+   Smart App Control can be turned off in Windows Security, App & browser
+   control, but Windows cannot turn it back on without a reinstall, so decide
+   this with the computer's owner. More in "On the learner's computer" at
+   https://github.com/jbarbier/trurl/blob/main/docs/USB-BUNDLE.md
+3. Read the licenses, click "I Agree", then "Install". The installer copies the
+   models from the "models" folder: this takes a few minutes, depending on the stick. Do not remove the
+   stick until it says it is finished.
+4. Open Trurl from the Start menu.
+
+No administrator password is needed. Trurl installs for the current user only.
+
+ON A LINUX COMPUTER (if there is a "linux" folder on this stick)
+
+1. Open a terminal in the "linux" folder.
+2. Type:   tar xzf trurl-*-linux-x64.tar.gz
+3. Type:   sh trurl-*-linux-x64/install.sh
+   (it also copies the models from this stick)
+4. Type:   trurl
+   If "trurl" is not found, log out and back in once, or type ~/.local/bin/trurl
+
+WHAT IS ON THIS STICK
+
+  Trurl_..._x64-offline-setup.exe   the Windows installer
+  linux/              the terminal version for Linux
+  models/             Gemma 3 1B Instruct (806 MB), Gemma 3 4B Instruct (2.5 GB), Qwen3 0.6B (484 MB)
+  LICENSES/           Gemma Terms of Use and every other license
+  SHA256SUMS.txt      to check that a copy is complete
+
+If a computer has only 4 GB of memory, use Gemma 3 1B or Qwen3 0.6B. In Trurl, a
+green dot next to a model means it fits easily.
+
+To check a copied stick:
+  Linux:    sha256sum -c SHA256SUMS.txt
+  Windows (PowerShell, no output means all good):
+    Get-Content SHA256SUMS.txt | % { $h,$f = $_ -split '  ',2; if ((Get-FileHash $f).Hash -ne $h) { "BAD: $f" } }

@@ -1,7 +1,13 @@
-target/
-node_modules/
-dist/
 *.gguf
 *.key
+*.part
 .env
+/apps/desktop/src-tauri/gen/
+/apps/desktop/src-tauri/icons/
+/apps/desktop/src-tauri/resources/
+/dist/
 /vendor/
+__pycache__/
+dist/
+node_modules/
+target/

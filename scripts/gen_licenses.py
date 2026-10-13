@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Write the generated license files.
+
+  licenses/THIRD-PARTY.txt  the license of every component shipped inside Trurl
+  licenses/INSTALLER.txt    what the installer shows: Trurl, the bundled models
+                            (full Gemma Terms of Use), llama.cpp
+
+THIRD-PARTY.txt:
+
+Covers every Rust crate the desktop app and the terminal app link (from
+`cargo metadata`, normal dependencies of the shipped binaries only, no
+dev/build-only crates), with each crate's own license file(s) from the cargo
+registry, plus the vendored JavaScript. Identical texts are printed once with
+the list of crates that use them.
+
+Run after any dependency or license change. `--check` (used by
+scripts/check_pins.py) fails if either file is stale.
+
+  python3 scripts/gen_licenses.py
+  python3 scripts/gen_licenses.py --check
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import sys
+from collections import OrderedDict
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "licenses" / "THIRD-PARTY.txt"
+INSTALLER = ROOT / "licenses" / "INSTALLER.txt"
+SHIPPED = {"trurl-desktop", "trurl-tui"}
+LICENSE_FILE = re.compile(r"^(LICEN[CS]E|COPYING|NOTICE)([-_.].*)?$", re.I)
+
+
+def metadata() -> dict:
+    out = subprocess.run(
+        ["cargo", "metadata", "--format-version", "1", "--locked", "--filter-platform", "x86_64-pc-windows-msvc"],
+        cwd=ROOT, check=True, capture_output=True, text=True,
+    ).stdout
+    linux = subprocess.run(
+        ["cargo", "metadata", "--format-version", "1", "--locked", "--filter-platform", "x86_64-unknown-linux-gnu"],
+        cwd=ROOT, check=True, capture_output=True, text=True,
+    ).stdout
+    return {"win": json.loads(out), "linux": json.loads(linux)}
+
+
+def shipped_packages(meta: dict) -> dict[str, dict]:
+    """Walk normal (non-dev, non-build) dependencies from the shipped binaries."""
+    pkgs = {p["id"]: p for p in meta["packages"]}
+    nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
+    roots = [p["id"] for p in meta["packages"] if p["name"] in SHIPPED]
+    seen: set[str] = set()
+    stack = list(roots)
+    while stack:
+        pid = stack.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        for dep in nodes[pid]["deps"]:
+            kinds = {k["kind"] for k in dep["dep_kinds"]}
+            if None in kinds:  # normal dependency
+                stack.append(dep["pkg"])
+    return {pid: pkgs[pid] for pid in seen if pkgs[pid]["source"]}  # skip our own path crates
+
+
+def license_texts(pkg: dict) -> list[str]:
+    d = Path(pkg["manifest_path"]).parent
+    files = sorted(p for p in d.iterdir() if p.is_file() and LICENSE_FILE.match(p.name))
+    texts = []
+    for f in files:
+        try:
+            texts.append(f.read_text(encoding="utf-8", errors="replace").strip())
+        except OSError:
+            pass
+    return texts
+
+
+def installer_text() -> str:
+    L = ROOT / "licenses"
+    rule = "=" * 72
+    parts = [
+        "TRURL LICENSES",
+        "",
+        "Trurl is free and open-source software by Cyberiad Labs, under the MIT License (below).",
+        "",
+        "The Trurl installer for USB sticks also installs these AI models, which have their own licenses:",
+        "  - Gemma 3 1B Instruct and Gemma 3 4B Instruct: Gemma Terms of Use (below).",
+        "    Gemma is provided under and subject to the Gemma Terms of Use found at ai.google.dev/gemma/terms",
+        "  - Qwen3 0.6B: Apache License 2.0 (below).",
+        "",
+        "Trurl runs the models with llama.cpp (MIT License, below). Every license is also in the",
+        "\"licenses\" folder where Trurl is installed, and in Trurl's About screen.",
+        "",
+        rule, "Trurl", rule, "",
+        (ROOT / "LICENSE").read_text().strip(), "",
+        rule, "Gemma 3 models", rule, "",
+        (L / "Gemma-Terms-of-Use.txt").read_text().strip(), "",
+        rule, "Qwen3 0.6B", rule, "",
+        (L / "Qwen3-Apache-2.0.txt").read_text().strip(), "",
+        rule, "llama.cpp", rule, "",
+        (L / "llama.cpp-MIT.txt").read_text().strip(), "",
+    ]
+    return "\n".join(parts) + "\n"
+
+
+def third_party_text() -> str:
+    metas = metadata()
+    packages: dict[str, dict] = {}
+    for m in metas.values():
+        packages.update(shipped_packages(m))
+    by_text: "OrderedDict[str, list[str]]" = OrderedDict()
+    missing: list[str] = []
+    for p in sorted(packages.values(), key=lambda p: (p["name"], p["version"])):
+        label = f"{p['name']} {p['version']} ({p.get('license') or 'see text'})"
+        texts = license_texts(p)
+        if not texts:
+            missing.append(label)
+            continue
+        by_text.setdefault("\n\n".join(texts), []).append(label)
+
+    vendored = json.loads((ROOT / "pins.json").read_text())["vendored"]
+    lines = [
+        "Third-party components shipped inside Trurl",
+        "=" * 44,
+        "",
+        "Generated by scripts/gen_third_party.py. Do not edit by hand.",
+        "",
+        "JavaScript and fonts in the desktop app:",
+    ]
+    for v in vendored:
+        lines.append(f"  - {v['package']} {v['version']} ({v['license']})")
+    lines += [
+        "    marked: Copyright (c) 2018+, MarkedJS; Copyright (c) 2011-2018, Christopher Jeffrey. MIT License.",
+        "    DOMPurify: Copyright 2025 Dr.-Ing. Mario Heiderich, Cure53. Apache License 2.0 or MPL 2.0.",
+        "    Sora: see Sora-OFL.txt.",
+        "",
+        f"Rust crates: {len(packages)}.",
+        "",
+    ]
+    for text, users in by_text.items():
+        lines.append("-" * 78)
+        lines.append("Used by: " + ", ".join(users))
+        lines.append("-" * 78)
+        lines.append(text)
+        lines.append("")
+    if missing:
+        lines.append("-" * 78)
+        lines.append("Crates whose package carries no license file (license from their manifest):")
+        lines += [f"  - {m}" for m in missing]
+        lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def main() -> int:
+    check = "--check" in sys.argv
+    stale = []
+    for path, text in [(INSTALLER, installer_text()), (OUT, third_party_text())]:
+        current = path.read_text(encoding="utf-8") if path.exists() else ""
+        if current == text:
+            print(f"up to date: {path.relative_to(ROOT)}")
+        elif check:
+            stale.append(path)
+            print(f"STALE: {path.relative_to(ROOT)} (run python3 scripts/gen_licenses.py)")
+        else:
+            path.write_text(text, encoding="utf-8")
+            print(f"wrote {path.relative_to(ROOT)} ({len(text) // 1024} KB)")
+    return 1 if stale else 0
+
+
+if __name__ == "__main__":
+    if not (ROOT / "Cargo.lock").exists():
+        sys.exit("run cargo generate-lockfile first")
+    sys.exit(main())

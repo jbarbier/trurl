@@ -1,0 +1,5 @@
+# Signed test fixtures: the signature covers the exact bytes, so Git must never
+# change their line endings (Windows checkouts default to CRLF).
+crates/trurl-core/tests/fixtures/** -text
+# Shell scripts run on Linux and in Git Bash: always LF.
+*.sh text eol=lf

@@ -1,0 +1,8 @@
+{
+  "name": "trurl-desktop",
+  "private": true,
+  "description": "The Tauri command line, pinned by this lockfile: npm ci, then npx tauri build. Never npx @tauri-apps/cli@... (that skips the lockfile).",
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.2"
+  }
+}

@@ -1,0 +1,167 @@
+name: Release
+
+# Push a tag "v<version>" (the version in pins.json) to build, test and prepare:
+#   Trurl_<v>_x64-setup.exe          + .sig   what the desktop updater installs
+#   Trurl_<v>_x64-offline-setup.exe            for USB sticks (includes WebView2)
+#   trurl-<v>-linux-x64.tar.gz       + .sig   terminal app, glibc 2.31+
+#   latest.json                                the update manifest
+#   SHA256SUMS.txt
+# The release is created as a DRAFT: learners get nothing until a maintainer
+# reviews it and clicks "Publish release" on GitHub. See docs/RELEASING.md.
+#
+# Supply chain: llama-server is rebuilt from the pinned source (no cache), and
+# the signing key exists only in the one step that signs, in a job that builds
+# no project code.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      TRURL_TEST_MODELS: ${{ github.workspace }}/../trurl-models
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Tag matches pins.json
+        run: |
+          $v = (Get-Content pins.json | ConvertFrom-Json).app.version
+          if ("${{ github.ref_name }}" -ne "v$v") { throw "tag ${{ github.ref_name }} != v$v" }
+      - name: Build llama-server from the pinned source (no cache)
+        run: python scripts/build_llama.py
+      - run: python scripts/check_pe_imports.py vendor/llama/windows
+      - name: llama.cpp's own code uses only its CPU tier's instructions
+        env:
+          OBJDUMP: C:\Program Files\LLVM\bin\llvm-objdump.exe
+        run: |
+          $c = (Get-Content pins.json | ConvertFrom-Json).llama_cpp.commit.Substring(0, 12)
+          python scripts/check_cpu_isa.py --objects "$HOME/.cache/trurl/build-windows-$c"
+          if ($LASTEXITCODE -ne 0) { throw "CPU tier check failed" }
+      - name: Each build answers on an emulated CPU of its tier (Intel SDE)
+        run: |
+          python scripts/fetch_models.py --dest $env:TRURL_TEST_MODELS --test-models
+          if ($LASTEXITCODE -ne 0) { throw "fetch_models failed" }
+          python scripts/check_cpu_emulated.py vendor/llama/windows --model "$env:TRURL_TEST_MODELS/stories260K-f32.gguf"
+          if ($LASTEXITCODE -ne 0) { throw "a build crashed on its oldest CPU" }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Tauri CLI from its lockfile, then the icons from branding/app-icon.svg
+        working-directory: apps/desktop
+        run: |
+          npm ci --no-audit --no-fund
+          npx --no -- tauri icon ../../branding/app-icon.svg -o src-tauri/icons
+      - name: Update installer (small; WebView2 fetched only if missing)
+        working-directory: apps/desktop
+        run: |
+          npx --no -- tauri build -- --locked
+          New-Item -ItemType Directory -Force ../../dist | Out-Null
+          $v = (Get-Content ../../pins.json | ConvertFrom-Json).app.version
+          Copy-Item "../../target/release/bundle/nsis/Trurl_${v}_x64-setup.exe" ../../dist/
+      - name: USB installer (embeds the WebView2 offline installer)
+        working-directory: apps/desktop
+        run: |
+          npx --no -- tauri build --config src-tauri/tauri.usb.conf.json -- --locked
+          $v = (Get-Content ../../pins.json | ConvertFrom-Json).app.version
+          Copy-Item "../../target/release/bundle/nsis/Trurl_${v}_x64-setup.exe" "../../dist/Trurl_${v}_x64-offline-setup.exe"
+      - name: Models for the smoke test
+        run: python scripts/fetch_models.py --dest $env:TRURL_TEST_MODELS --only gemma-3-1b-it,qwen3-0.6b
+      - name: Smoke-test the USB installer exactly as a teacher uses it
+        run: ./scripts/windows_smoke.ps1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows
+          path: dist/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: windows-smoke-screenshots
+          path: target/e2e/
+          if-no-files-found: ignore
+
+  linux:
+    runs-on: ubuntu-24.04
+    # Debian 11: glibc 2.31, so the result runs on Ubuntu 20.04+ and Debian 11+.
+    # Debian 11 (glibc 2.31) so the Linux build runs on older distributions too.
+    # Pinned by digest: the tag moves with every Debian point release.
+    container: debian:bullseye@sha256:6f519a81440354a85eb592c5f32109ab80605f6b892455983a6f618bf87fabe9
+    steps:
+      - run: apt-get update && apt-get install -y --no-install-recommends build-essential ca-certificates curl git python3 ninja-build binutils
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Pinned CMake
+        run: |
+          curl -sSL -o /tmp/cmake.tgz https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-linux-x86_64.tar.gz
+          echo "5a1133ff103c71eb5120e2cc3de922733e7d8a26a98ae716397e8676adb367bf  /tmp/cmake.tgz" | sha256sum -c -
+          tar -xzf /tmp/cmake.tgz -C /opt
+          echo "/opt/cmake-3.31.6-linux-x86_64/bin" >> "$GITHUB_PATH"
+      - name: Pinned Rust
+        run: |
+          curl -sSfo /tmp/rustup-init https://static.rust-lang.org/rustup/archive/1.29.1/x86_64-unknown-linux-gnu/rustup-init
+          echo "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71  /tmp/rustup-init" | sha256sum -c -
+          chmod +x /tmp/rustup-init
+          /tmp/rustup-init -y --profile minimal --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - run: python3 scripts/build_llama.py
+      - run: python3 scripts/check_cpu_isa.py vendor/llama/linux
+      - run: bash scripts/package_linux.sh
+      - name: Runs on Ubuntu 20.04 / Debian 11 and newer (glibc 2.31)
+        run: python3 scripts/check_glibc.py --max 2.31 target/release/trurl vendor/llama/linux
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux
+          path: dist/*.tar.gz
+
+  publish:
+    needs: [windows, linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false  # gh uses GH_TOKEN; no token left in .git/config while crates build
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linux
+          path: dist
+      - name: Version
+        run: echo "V=$(python3 -c 'import json;print(json.load(open("pins.json"))["app"]["version"])')" >> "$GITHUB_ENV"
+      - name: Tauri CLI from its lockfile (before any secret is in the environment)
+        run: npm ci --prefix apps/desktop --no-audit --no-fund --ignore-scripts
+      - name: Sign the update files (the only step that sees the key)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          # The CLI comes from apps/desktop/package-lock.json (hash-checked by npm ci),
+          # installed before the key is in the environment: nothing unpinned runs with it.
+          tauri=apps/desktop/node_modules/.bin/tauri
+          "$tauri" signer sign --app-version "$V" "dist/Trurl_${V}_x64-setup.exe"
+          "$tauri" signer sign --app-version "$V" "dist/trurl-${V}-linux-x64.tar.gz"
+      - name: Check every signature the way installed copies of Trurl will
+        run: |
+          cargo run --locked --quiet -p trurl-core --example verify_update -- "dist/Trurl_${V}_x64-setup.exe" "dist/Trurl_${V}_x64-setup.exe.sig" "$V"
+          cargo run --locked --quiet -p trurl-core --example verify_update -- "dist/trurl-${V}-linux-x64.tar.gz" "dist/trurl-${V}-linux-x64.tar.gz.sig" "$V"
+      - name: Manifest, checksums, draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/release_notes.py "$V" > notes.md
+          python3 scripts/make_manifest.py --version "$V" --notes-file notes.md \
+            --windows "dist/Trurl_${V}_x64-setup.exe" \
+            --linux "dist/trurl-${V}-linux-x64.tar.gz" --out dist/latest.json
+          (cd dist && sha256sum *.exe *.tar.gz > SHA256SUMS.txt)
+          gh release create "v$V" --draft --title "Trurl $V" --notes-file notes.md dist/*

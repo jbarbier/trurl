@@ -1,0 +1,27 @@
+[package]
+name = "trurl-desktop"
+description = "Trurl desktop app (Windows): a thin Tauri shell around trurl-core."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "trurl"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "=2.7.2", features = [] }
+
+[dependencies]
+trurl-core.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tauri = { version = "=2.12.3", features = [] }
+tauri-plugin-dialog = "=2.8.2"
+tauri-plugin-updater = { version = "=2.13.3", default-features = false, features = ["native-tls", "system-proxy"] }
+tauri-plugin-process = "=2.4.0"
+tauri-plugin-single-instance = "=2.5.3"

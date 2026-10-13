@@ -1,0 +1,41 @@
+[package]
+name = "trurl-core"
+description = "Everything Trurl does that is not UI: llama-server, chat, models, Hugging Face, downloads, updates."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+base64.workspace = true
+bytes.workspace = true
+dirs.workspace = true
+futures-util.workspace = true
+hex.workspace = true
+minisign-verify.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sysinfo.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+reqwest = { workspace = true, features = ["native-tls"] }
+
+[target.'cfg(not(windows))'.dependencies]
+reqwest = { workspace = true, features = ["rustls-no-provider"] }
+rustls.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+axum.workspace = true

@@ -1,0 +1,78 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Trurl",
+  "version": "0.1.0",
+  "identifier": "com.cyberiadlabs.trurl",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Trurl",
+        "width": 1280,
+        "height": 760,
+        "minWidth": 960,
+        "minHeight": 560,
+        "center": true,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "publisher": "Cyberiad Labs",
+    "copyright": "Copyright (c) 2026 Cyberiad Labs. MIT License.",
+    "category": "Education",
+    "shortDescription": "Run open-weight language models offline, to learn how they work.",
+    "longDescription": "Trurl runs small open-weight language models on your own computer, without internet, so you can see how they work: the system prompt, the temperature, the context window and the model's reasoning.",
+    "homepage": "https://github.com/jbarbier/trurl",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "licenseFile": "../../../licenses/INSTALLER.txt",
+    "resources": {
+      "../../../vendor/llama/windows/": "llama/",
+      "../../../licenses/": "licenses/"
+    },
+    "createUpdaterArtifacts": false,
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "./installer.nsh",
+        "languages": [
+          "English"
+        ],
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY2QjFGRTA4RUNGNUZGRUIKUldUci8vWHNDUDZ4WnJpQVNvaitQZXZEMmlFcnc1RlNla3p3RmxNQ2hoMHdKNm9BQi9GUm85enAK",
+      "endpoints": [
+        "https://github.com/jbarbier/trurl/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      },
+      "requireSignedVersion": true
+    }
+  }
+}
