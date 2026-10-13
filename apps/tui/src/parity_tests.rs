@@ -56,6 +56,9 @@ fn turn(id: u64, status: TurnStatus) -> Turn {
         status,
         thought_ms: None,
         error: None,
+        system_prompt: String::new(),
+        temperature: 0.7,
+        context: 2048,
     }
 }
 
@@ -109,6 +112,10 @@ fn running_out_of_room_says_so_in_plain_words() {
     ui.turns = vec![t];
     let s = flat(&screen(&ui, 100, 30));
     assert!(s.contains("Ran out of room while thinking"), "{s}");
+    assert!(
+        s.contains("Let me think about this very carefully"),
+        "the reasoning stays open: it is all there is to read: {s}"
+    );
     assert!(s.contains("The conversation ran out of room."), "{s}");
     assert!(
         s.contains("Start a new chat or increase the context size."),
@@ -243,4 +250,51 @@ fn every_screen_draws_at_80_by_24_without_panicking() {
         let _ = screen(&ui, 80, 24);
         let _ = screen(&ui, 40, 12);
     }
+}
+
+#[test]
+fn each_answer_shows_the_settings_it_was_written_with() {
+    let mut ui = Ui::new();
+    ready(&mut ui);
+    let mut t = turn(1, TurnStatus::Done);
+    t.answer = "Bonjour !".into();
+    t.temperature = 0.0;
+    t.system_prompt = "Answer only in French.".into();
+    ui.turns = vec![t];
+    let s = flat(&screen(&ui, 100, 30));
+    assert!(s.contains("temperature 0.0"), "{s}");
+    assert!(s.contains("system prompt: “Answer only in French.”"), "{s}");
+}
+
+#[test]
+fn math_is_shown_as_text() {
+    let mut ui = Ui::new();
+    ready(&mut ui);
+    let mut t = turn(1, TurnStatus::Done);
+    t.answer = "So $x^2 = 9$ and the answer is $\\boxed{3}$.".into();
+    ui.turns = vec![t];
+    let s = flat(&screen(&ui, 100, 30));
+    assert!(s.contains("So x² = 9 and the answer is 3."), "{s}");
+}
+
+#[test]
+fn a_model_that_is_not_thinking_is_not_called_thinking() {
+    let mut ui = Ui::new();
+    ready(&mut ui);
+    ui.generating = true;
+    ui.turns = vec![turn(1, TurnStatus::Streaming)];
+    assert_eq!(ui.engine_label().1, "starting");
+    ui.turns[0].reasoning = "Hmm".into();
+    assert_eq!(ui.engine_label().1, "thinking");
+    ui.turns[0].answer = "42".into();
+    assert_eq!(ui.engine_label().1, "answering");
+}
+
+#[test]
+fn ctrl_n_during_an_answer_asks_first() {
+    let mut ui = Ui::new();
+    ready(&mut ui);
+    ui.confirm = Some(Confirm::NewChat);
+    let s = flat(&screen(&ui, 100, 30));
+    assert!(s.contains("The answer so far will be lost."), "{s}");
 }

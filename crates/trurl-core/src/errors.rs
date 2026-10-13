@@ -141,6 +141,24 @@ impl UserError {
         )
     }
 
+    /// Ran out of room on the first message of a chat.
+    pub fn context_full_first() -> Self {
+        Self::new(
+            ErrorCode::ContextFull,
+            "The conversation ran out of room.",
+            "Increase the context size, then ask again.",
+        )
+    }
+
+    /// The message alone does not fit in the context.
+    pub fn message_too_long() -> Self {
+        Self::new(
+            ErrorCode::ContextFull,
+            "Your message is too long for the context size.",
+            "Increase the context size, or send a shorter message.",
+        )
+    }
+
     pub fn busy() -> Self {
         Self::new(
             ErrorCode::Busy,
@@ -340,6 +358,8 @@ mod tests {
             UserError::server_start(),
             UserError::server_crashed(),
             UserError::context_full(),
+            UserError::context_full_first(),
+            UserError::message_too_long(),
             UserError::busy(),
             UserError::offline(),
             UserError::hub_failed(),

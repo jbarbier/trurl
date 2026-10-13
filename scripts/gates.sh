@@ -13,5 +13,6 @@ step "tests";        cargo test --locked --quiet
 step "pins";         python3 scripts/check_pins.py
 step "copy";         python3 scripts/check_copy.py
 step "network";      python3 scripts/check_network.py
+step "ui math";      node apps/desktop/ui/plainmath.test.cjs
 echo
 echo "gates: all passed"

@@ -218,7 +218,10 @@ if (SUITE === "full") {
     await waitPill("Ready", 300000);
     await ask("Please repeat this text back to me exactly: " + "the quick brown fox jumps over the lazy dog. ".repeat(40));
     const note = await lastTurn().locator(".inline-note").innerText();
-    if (!note.includes("The conversation ran out of room.")) throw new Error("no out-of-room message: " + note);
+    if (!note.includes("Your message is too long for the context size.")) throw new Error("no too-long message: " + note);
+    // The first message of a chat: a bigger context helps, a new chat does not.
+    if (!(await lastTurn().getByRole("button", { name: /Use 512 tokens/ }).count())) throw new Error("no one-click bigger context");
+    if (await lastTurn().getByRole("button", { name: "New chat" }).count()) throw new Error("New chat offered on the first message");
     await shot(page, "out-of-room");
     await page.locator("#ctxReset").click();
     await waitPill("Ready", 300000);

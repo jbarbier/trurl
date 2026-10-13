@@ -38,7 +38,10 @@
         <section class="field">
           <div class="field-row">
             <label class="field-label" for="sysPrompt">System prompt</label>
-            <button class="link-btn" id="sysClear" type="button" hidden>Clear</button>
+            <span class="field-row-end">
+              <span class="field-saved" id="sysSaved" role="status" hidden>Saved</span>
+              <button class="link-btn" id="sysClear" type="button" hidden>Clear</button>
+            </span>
           </div>
           <textarea id="sysPrompt" rows="2" placeholder="Example: Answer in two short sentences."></textarea>
           <p class="field-note" id="sysNote">Instructions the model follows in every answer.</p>
@@ -191,6 +194,7 @@
   <script src="vendor/purify.min.js"></script>
   <script src="mock.js"></script>
   <script src="api.js"></script>
+  <script src="plainmath.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

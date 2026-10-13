@@ -38,6 +38,14 @@ pub struct Turn {
     pub thought_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<UserError>,
+    /// The settings this answer was written with, so a learner comparing two
+    /// answers can see what changed between them.
+    #[serde(default)]
+    pub system_prompt: String,
+    #[serde(default)]
+    pub temperature: f32,
+    #[serde(default)]
+    pub context: u32,
 }
 
 impl Turn {
@@ -155,7 +163,10 @@ pub async fn stream(
         "messages": req.messages,
         "stream": true,
         "temperature": req.temperature,
-        "cache_prompt": true,
+        // At temperature 0 the course expects the same answer every time. Reusing
+        // a cached prompt makes llama.cpp process it in different batches, which
+        // changes the numbers just enough to change some words: so not then.
+        "cache_prompt": req.temperature > 0.0,
     });
     let send = http
         .post(format!("{}/v1/chat/completions", req.base_url))
@@ -306,6 +317,9 @@ mod tests {
             status,
             thought_ms: None,
             error: None,
+            system_prompt: String::new(),
+            temperature: 0.7,
+            context: 2048,
         }
     }
 

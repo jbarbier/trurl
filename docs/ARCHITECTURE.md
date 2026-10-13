@@ -141,19 +141,35 @@ prompt opened the thought), the text so far is moved into the reasoning block.
 
 **The thinking block.** It is open while the model thinks, and closes when the first
 answer word arrives, with "Thought for 12s". That is the time from the first
-reasoning token to the first answer token.
+reasoning token to the first answer token. If the context runs out while the model
+is still thinking, the block stays open: the reasoning is all there is to read.
+Before the first token the status says "Starting", not "Thinking": only a
+reasoning model thinks.
 
 **Stop** closes the HTTP stream, and llama-server stops generating when the client
 leaves.
 
 **"The conversation ran out of room. Start a new chat or increase the context size."**
-This message covers both ways the context fills:
+This is the course's message when the context fills (`finish_reason: length`, or
+HTTP 400 `exceed_context_size_error`). On the first message of a chat, "Start a new
+chat" cannot help, so the hint becomes "Increase the context size, then ask again",
+or, when the message alone does not fit, "Your message is too long for the context
+size". The desktop app offers one click to the next context size with the question
+put back in the box.
 
-- the question is too long to start (HTTP 400 `exceed_context_size_error`);
-- the context fills while answering (`finish_reason: length`).
+**Temperature 0** is greedy and repeatable: the evals check that the same question
+gives identical text, chat after chat, with and without a system prompt. At
+temperature 0 Trurl asks llama-server not to reuse its prompt cache
+(`cache_prompt: false`): a cached prompt is processed in different batches, which
+changes the numbers just enough to change a word.
 
-**Temperature 0** is greedy and repeatable: the evals check that two runs give
-identical text.
+**Each answer keeps its settings** (system prompt, temperature, context), shown
+under the model's name, so two answers can be compared.
+
+**Math.** Models write math in LaTeX (`$\frac{1}{2}$`, `\boxed{42}`). Both apps show
+it as plain text (1/2, 42) with no math library to pin or download:
+`apps/desktop/ui/plainmath.js` and `plain_math` in `apps/tui/src/text.rs`, checked
+against the same cases (`contracts/plainmath-cases.json`). Code is never touched.
 
 ## Models folder
 

@@ -7,6 +7,317 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 /// Wrap styled spans to `width` columns, prefixing every line with `prefix`.
+/// Math written by models in LaTeX ($\frac{1}{2}$, \boxed{42}), as plain text a
+/// learner can read: 1/2, 42. Same rules as apps/desktop/ui/plainmath.js; both
+/// are checked against contracts/plainmath-cases.json. Code is never touched.
+pub fn plain_math(text: &str) -> String {
+    if !text.contains('$') && !text.contains('\\') {
+        return text.to_string();
+    }
+    // Split out code (``` blocks and `spans`), convert only the rest.
+    let mut out = String::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        let fence = rest.find("```");
+        let tick = rest.find('`');
+        match tick {
+            None => {
+                out.push_str(&math_prose(rest));
+                break;
+            }
+            Some(t) => {
+                out.push_str(&math_prose(&rest[..t]));
+                let code_end = if fence == Some(t) {
+                    rest[t + 3..]
+                        .find("```")
+                        .map_or(rest.len(), |e| t + 3 + e + 3)
+                } else {
+                    match rest[t + 1..].find(['`', '\n']) {
+                        Some(e) if rest.as_bytes()[t + 1 + e] == b'`' => t + 1 + e + 1,
+                        _ => t + 1,
+                    }
+                };
+                out.push_str(&rest[t..code_end]);
+                rest = &rest[code_end..];
+            }
+        }
+    }
+    out
+}
+
+fn math_prose(s: &str) -> String {
+    let mut out = String::new();
+    let b: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    let text = |a: usize, z: usize| b[a..z].iter().collect::<String>();
+    let find = |from: usize, pat: &str| {
+        let p: Vec<char> = pat.chars().collect();
+        (from..b.len().saturating_sub(p.len() - 1)).find(|&k| b[k..k + p.len()] == p[..])
+    };
+    while i < b.len() {
+        // $$ … $$, \[ … \], \( … \)
+        let pairs = [("$$", "$$"), ("\\[", "\\]"), ("\\(", "\\)")];
+        let mut done = false;
+        for (open, close) in pairs {
+            let o: Vec<char> = open.chars().collect();
+            if b[i..].starts_with(&o)
+                && let Some(e) = find(i + o.len(), close)
+            {
+                out.push_str(&convert(&text(i + o.len(), e)));
+                i = e + close.chars().count();
+                done = true;
+                break;
+            }
+        }
+        if done {
+            continue;
+        }
+        // Inline $…$: not money ("$5 and $10"): no space just inside, no digit right after.
+        if b[i] == '$'
+            && (i == 0 || !(b[i - 1].is_alphanumeric() || b[i - 1] == '\\' || b[i - 1] == '$'))
+            && b.get(i + 1).is_some_and(|c| !c.is_whitespace())
+            && let Some(e) = (i + 1..b.len())
+                .find(|&k| b[k] == '$' || b[k] == '\n')
+                .filter(|&k| b[k] == '$')
+            && !b[e - 1].is_whitespace()
+            && !b.get(e + 1).is_some_and(|c| c.is_ascii_digit())
+        {
+            out.push_str(&convert(&text(i + 1, e)));
+            i = e + 1;
+            continue;
+        }
+        // The few commands models also write outside math.
+        if b[i] == '\\' {
+            let word: String = b[i + 1..]
+                .iter()
+                .take_while(|c| c.is_ascii_alphabetic())
+                .collect();
+            let after = i + 1 + word.len();
+            if (word == "boxed" || word == "text" || word == "textbf") && b.get(after) == Some(&'{')
+            {
+                let (g, end) = group(&b, after);
+                out.push_str(&convert(&g));
+                i = end;
+                continue;
+            }
+            if word == "quad" || word == "qquad" {
+                out.push(' ');
+                i = after;
+                if b.get(i) == Some(&' ') {
+                    i += 1;
+                }
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    out
+}
+
+/// The content of the {group} at b[i] == '{', and the index after it.
+fn group(b: &[char], i: usize) -> (String, usize) {
+    let mut depth = 0;
+    for (j, &c) in b.iter().enumerate().skip(i) {
+        if c == '{' {
+            depth += 1;
+        } else if c == '}' {
+            depth -= 1;
+            if depth == 0 {
+                return (b[i + 1..j].iter().collect(), j + 1);
+            }
+        }
+    }
+    (b[i + 1..].iter().collect(), b.len())
+}
+
+fn needs_parens(x: &str) -> bool {
+    let t = x.trim();
+    t.contains(['+', '-', '×', '÷', '·', '/', ' ']) && !(t.starts_with('(') && t.ends_with(')'))
+}
+
+fn sup(x: &str) -> String {
+    let m = |c: char| match c {
+        '0' => Some('⁰'),
+        '1' => Some('¹'),
+        '2' => Some('²'),
+        '3' => Some('³'),
+        '4' => Some('⁴'),
+        '5' => Some('⁵'),
+        '6' => Some('⁶'),
+        '7' => Some('⁷'),
+        '8' => Some('⁸'),
+        '9' => Some('⁹'),
+        '+' => Some('⁺'),
+        '-' => Some('⁻'),
+        'n' => Some('ⁿ'),
+        _ => None,
+    };
+    x.chars()
+        .map(m)
+        .collect::<Option<String>>()
+        .unwrap_or_else(|| format!("^({x})"))
+}
+
+fn symbol(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "times" => "×",
+        "cdot" => "·",
+        "div" => "÷",
+        "pm" => "±",
+        "mp" => "∓",
+        "le" | "leq" => "≤",
+        "ge" | "geq" => "≥",
+        "neq" | "ne" => "≠",
+        "approx" => "≈",
+        "equiv" => "≡",
+        "infty" => "∞",
+        "pi" => "π",
+        "alpha" => "α",
+        "beta" => "β",
+        "gamma" => "γ",
+        "delta" => "δ",
+        "theta" => "θ",
+        "lambda" => "λ",
+        "mu" => "μ",
+        "sigma" => "σ",
+        "Sigma" => "Σ",
+        "Delta" => "Δ",
+        "omega" => "ω",
+        "to" | "rightarrow" => "→",
+        "Rightarrow" | "implies" => "⇒",
+        "leftarrow" => "←",
+        "iff" => "⇔",
+        "ldots" | "dots" | "cdots" => "…",
+        "degree" | "circ" => "°",
+        "percent" => "%",
+        "sum" => "Σ",
+        "prod" => "Π",
+        "in" => "∈",
+        "cup" => "∪",
+        "cap" => "∩",
+        "forall" => "∀",
+        "exists" => "∃",
+        "quad" | "," | ";" | " " => " ",
+        "qquad" => "  ",
+        "!" => "",
+        _ => return None,
+    })
+}
+
+/// One piece of LaTeX math, as text.
+fn convert(src: &str) -> String {
+    let b: Vec<char> = src.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    const TAKES_GROUP: &[&str] = &[
+        "frac",
+        "dfrac",
+        "tfrac",
+        "sqrt",
+        "boxed",
+        "text",
+        "textbf",
+        "mathrm",
+        "mathbf",
+        "operatorname",
+        "mbox",
+        "textit",
+        "mathit",
+        "left",
+        "right",
+    ];
+    while i < b.len() {
+        let c = b[i];
+        if c == '\\' {
+            let name: String = if b.get(i + 1).is_some_and(|c| c.is_ascii_alphabetic()) {
+                b[i + 1..]
+                    .iter()
+                    .take_while(|c| c.is_ascii_alphabetic())
+                    .collect()
+            } else {
+                b.get(i + 1).map(|c| c.to_string()).unwrap_or_default()
+            };
+            i += 1 + name.chars().count();
+            if TAKES_GROUP.contains(&name.as_str()) {
+                while b.get(i) == Some(&' ') {
+                    i += 1;
+                }
+            }
+            let arg = |i: &mut usize| -> String {
+                if b.get(*i) == Some(&'{') {
+                    let (g, e) = group(&b, *i);
+                    *i = e;
+                    g
+                } else {
+                    String::new()
+                }
+            };
+            match name.as_str() {
+                "frac" | "dfrac" | "tfrac" => {
+                    let a = convert(&arg(&mut i));
+                    let d = convert(&arg(&mut i));
+                    let p = |x: &str| {
+                        if needs_parens(x) {
+                            format!("({x})")
+                        } else {
+                            x.to_string()
+                        }
+                    };
+                    out.push_str(&format!("{}/{}", p(&a), p(&d)));
+                }
+                "sqrt" => {
+                    let a = convert(&arg(&mut i));
+                    out.push('√');
+                    out.push_str(&if needs_parens(&a) {
+                        format!("({a})")
+                    } else {
+                        a
+                    });
+                }
+                "text" | "mbox" => out.push_str(&arg(&mut i)),
+                "boxed" | "textbf" | "mathrm" | "mathbf" | "operatorname" | "textit" | "mathit" => {
+                    let a = arg(&mut i);
+                    out.push_str(&convert(&a));
+                }
+                "left" | "right" | "big" | "Big" | "displaystyle" => {}
+                "{" | "}" | "%" | "$" | "#" | "&" | "_" => out.push_str(&name),
+                n => out.push_str(symbol(n).unwrap_or(n)),
+            }
+        } else if c == '^' || c == '_' {
+            i += 1;
+            let a = if b.get(i) == Some(&'{') {
+                let (g, e) = group(&b, i);
+                i = e;
+                g
+            } else {
+                let s = b.get(i).map(|c| c.to_string()).unwrap_or_default();
+                i += 1;
+                s
+            };
+            let a = convert(&a);
+            out.push_str(&if c == '^' { sup(&a) } else { a });
+        } else if c == '{' || c == '}' || c == '&' {
+            i += 1;
+        } else {
+            out.push(c);
+            i += 1;
+        }
+    }
+    // Tidy: no space just inside brackets, single spaces.
+    let mut t = String::new();
+    for ch in out.chars() {
+        if ch == ' ' && (t.ends_with(' ') || t.ends_with(['(', '[', '{'])) {
+            continue;
+        }
+        if matches!(ch, ')' | ']' | '}') && t.ends_with(' ') {
+            t.pop();
+        }
+        t.push(ch);
+    }
+    t.trim().to_string()
+}
+
 /// Text from the network (release notes, model cards) without control
 /// characters: an escape sequence must never reach the terminal.
 pub fn clean(s: &str) -> String {
@@ -374,6 +685,20 @@ pub fn human_duration(ms: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn math_reads_as_plain_text_like_the_desktop() {
+        let cases: Vec<(String, String)> =
+            serde_json::from_str(include_str!("../../../contracts/plainmath-cases.json")).unwrap();
+        let mut bad = Vec::new();
+        for (input, want) in &cases {
+            let got = plain_math(input);
+            if &got != want {
+                bad.push(format!("{input:?}\n  got  {got:?}\n  want {want:?}"));
+            }
+        }
+        assert!(bad.is_empty(), "{}", bad.join("\n"));
+    }
 
     fn text(lines: &[Line]) -> Vec<String> {
         lines

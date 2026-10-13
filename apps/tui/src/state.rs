@@ -32,6 +32,8 @@ pub enum Confirm {
         file: String,
         name: String,
     },
+    /// Ctrl+N while the model is still answering.
+    NewChat,
     /// "Update available": the version and its full release notes.
     Update {
         version: String,
@@ -288,7 +290,13 @@ impl Ui {
     /// Is the thinking block of this turn open? Open while it streams, closed
     /// once the answer starts; the learner can flip any of them.
     pub fn thinking_open(&self, t: &Turn) -> bool {
-        let default = t.status == TurnStatus::Streaming && t.answer.is_empty();
+        // Open while it streams, and when the context ran out while thinking:
+        // then the reasoning is all there is to read.
+        let ran_out = t.status == TurnStatus::Cut
+            || t.error
+                .as_ref()
+                .is_some_and(|e| e.code == trurl_core::ErrorCode::ContextFull);
+        let default = t.answer.is_empty() && (t.status == TurnStatus::Streaming || ran_out);
         default ^ self.toggled.contains(&t.id)
     }
 
@@ -304,15 +312,13 @@ impl Ui {
             EngineState::Ready { name, .. } => {
                 if self.generating {
                     // Until the first answer word, the model is reading or thinking.
-                    let answering = self
-                        .turns
-                        .last()
-                        .map(|t| t.status == TurnStatus::Streaming && !t.answer.is_empty())
-                        .unwrap_or(false);
-                    (
-                        name.clone(),
-                        if answering { "answering" } else { "thinking" },
-                    )
+                    // Only a reasoning model thinks; the others are reading the question.
+                    let kind = match self.turns.last() {
+                        Some(t) if !t.answer.is_empty() => "answering",
+                        Some(t) if !t.reasoning.is_empty() => "thinking",
+                        _ => "starting",
+                    };
+                    (name.clone(), kind)
                 } else {
                     (name.clone(), "ready")
                 }
@@ -336,6 +342,9 @@ mod tests {
             status: TurnStatus::Streaming,
             thought_ms: None,
             error: None,
+            system_prompt: String::new(),
+            temperature: 0.7,
+            context: 2048,
         }
     }
 

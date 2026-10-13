@@ -117,7 +117,7 @@
     FORBID_TAGS: ["img", "picture", "source", "video", "audio", "iframe", "style", "form", "input", "button", "svg", "math"],
     FORBID_ATTR: ["style", "id", "class"],
   };
-  const md = (text) => DOMPurify.sanitize(marked.parse(text || "", { gfm: true, async: false }), PURIFY);
+  const md = (text) => DOMPurify.sanitize(marked.parse(plainMath(text || ""), { gfm: true, async: false }), PURIFY);
 
   // ---------- State -------------------------------------------------------
 
@@ -159,7 +159,10 @@
     if (e.state !== "ready") return { s: "idle", text: "No model loaded" };
     if (S.generating) {
       const live = [...views.values()].find((v) => v.turn.status === "streaming");
-      return live && live.turn.answer ? { s: "answering", text: "Answering" } : { s: "thinking", text: "Thinking" };
+      if (live && live.turn.answer) return { s: "answering", text: "Answering" };
+      // Only a reasoning model thinks; the others are just reading the question.
+      if (live && live.turn.reasoning) return { s: "thinking", text: "Thinking" };
+      return { s: "starting", text: "Starting" };
     }
     return { s: "ready", text: "Ready" };
   }
@@ -170,7 +173,7 @@
     const pill = $("pill");
     pill.dataset.s = st.s;
     // Moving indicators only while the learner is waiting for something to appear.
-    const indicator = st.s === "loading" ? spinner() : st.s === "thinking" ? dots() : h("span", { class: "dot", "aria-hidden": "true" });
+    const indicator = st.s === "loading" || st.s === "starting" ? spinner() : st.s === "thinking" ? dots() : h("span", { class: "dot", "aria-hidden": "true" });
     pill.replaceChildren(indicator, h("span", { text: st.text }));
     const m = currentModel();
     $("chatTitle").textContent = S.engine.name || (m && m.name) || "Trurl";
@@ -208,7 +211,13 @@
       btn.disabled = false;
       btn.replaceChildren(h("span", { class: "sq", "aria-hidden": "true" }), "Stop");
       btn.setAttribute("aria-label", "Stop the answer (Esc)");
-      note.textContent = status().s === "thinking" ? "Thinking. Press Esc or Stop to end it early." : "Writing an answer. Press Esc or Stop to end it early.";
+      const st = status().s;
+      note.textContent =
+        st === "thinking"
+          ? "The model is thinking. Press Esc or Stop to end it early."
+          : st === "starting"
+            ? "The model is reading your message. Press Esc or Stop to cancel."
+            : "Writing an answer. Press Esc or Stop to end it early.";
       delete note.dataset.warn;
       return;
     }
@@ -244,13 +253,13 @@
     }
     const e = S.engine;
     const engine =
-      e.state === "loading" ? [spinner(), "Loading"] : e.state === "ready" ? ["Ready"] : e.state === "failed" ? ["Did not load"] : ["Not loaded"];
+      e.state === "loading" ? [spinner(), "Loading"] : e.state === "ready" ? [] : e.state === "failed" ? ["Did not load"] : ["Not loaded"];
     card.replaceChildren(
       h("span", { class: "mc-name", text: m.name }),
       h("span", { class: "mc-row" }, h("span", { class: "mc-meta", text: [m.quant, fmt.size(m.size)].filter(Boolean).join(" · ") }), h("span", { class: "mc-change", text: "Change" })),
       h("span", { class: "mc-row" }, fitEl(m.fit), h("span", { class: "mc-engine" }, ...engine))
     );
-    card.setAttribute("aria-label", `Model: ${m.name}, ${FIT[m.fit] || ""}, ${engine[engine.length - 1]}. Change model.`);
+    card.setAttribute("aria-label", `Model: ${m.name}, ${FIT[m.fit] || ""}${engine.length ? ", " + engine[engine.length - 1] : ""}. Change model.`);
   }
 
   // ---------- Banners: engine failed, update card, notices -----------------
@@ -368,9 +377,21 @@
     clearTimeout(sysTimer);
     if (!S.settings || sys.value === S.settings.system_prompt) return;
     S.settings.system_prompt = sys.value;
-    run("set_system_prompt", { text: sys.value });
+    run("set_system_prompt", { text: sys.value }).then(() => {
+      const saved = $("sysSaved");
+      saved.hidden = false;
+      clearTimeout(saved._t);
+      saved._t = setTimeout(() => (saved.hidden = true), 2000);
+    });
+  }
+  // Grows with the text, up to the CSS max-height, so a long prompt stays readable.
+  function fitSys() {
+    sys.style.height = "auto";
+    sys.style.height = sys.scrollHeight + 2 + "px";
   }
   sys.addEventListener("input", () => {
+    fitSys();
+    $("sysSaved").hidden = true;
     $("sysClear").hidden = !sys.value;
     clearTimeout(sysTimer);
     sysTimer = setTimeout(saveSystemPrompt, 800);
@@ -409,6 +430,7 @@
     if (document.activeElement !== sys) {
       sys.value = st.system_prompt || "";
       $("sysClear").hidden = !sys.value;
+      fitSys();
     }
     if (document.activeElement !== temp || !temp.matches(":active")) temp.value = st.temperature;
     showTemp(st.temperature);
@@ -460,12 +482,21 @@
   function makeView(turn) {
     const ans = h("div", { class: "md" });
     const end = h("div", { class: "end" });
-    const answer = h("div", { class: "answer" }, h("div", { class: "who", text: turn.model || "" }), ans, end);
+    const answer = h("div", { class: "answer" }, h("div", { class: "who", text: turn.model || "" }), turnSettings(turn), ans, end);
     const el = h("article", { class: "turn", "aria-label": "Question and answer" }, h("div", { class: "msg-user", text: turn.user }), answer);
     const view = { turn: { ...turn }, el, answer, ans, end, think: null, painted: { reasoning: null, answer: null, status: null, live: null } };
     views.set(turn.id, view);
     paint(view);
     return view;
+  }
+
+  // What this answer was written with: comparing two answers is the lesson.
+  function turnSettings(t) {
+    if (t.temperature == null) return null;
+    const sp = (t.system_prompt || "").trim();
+    const short = sp.length > 70 ? sp.slice(0, 68) + "…" : sp;
+    const text = `Temperature ${Number(t.temperature).toFixed(1)} · ` + (sp ? `System prompt: “${short}”` : "No system prompt");
+    return h("div", { class: "turn-settings", title: sp || null, text });
   }
 
   function ensureThink(view) {
@@ -524,7 +555,9 @@
 
     if (p.status !== t.status) {
       p.status = t.status;
-      view.end.replaceChildren(...ending(t), ...copyButton(view));
+      view.end.replaceChildren(...ending(t, view), ...copyButton(view));
+      // Ran out of room while thinking: the reasoning is all there is to read.
+      if (view.think && !t.answer && (t.status === "cut" || (t.error && t.error.code === "context_full"))) setExpanded(view, true);
     }
   }
 
@@ -535,7 +568,7 @@
     const btn = h("button", { class: "link-btn copy-btn", type: "button", "aria-label": "Copy this answer" }, "Copy");
     btn.addEventListener("click", async () => {
       try {
-        await navigator.clipboard.writeText(view.turn.answer);
+        await navigator.clipboard.writeText(view.ans.innerText.trim());
         btn.textContent = "Copied";
       } catch {
         // No clipboard access: select the answer so Ctrl+C copies it.
@@ -551,7 +584,7 @@
     return [btn];
   }
 
-  function ending(t) {
+  function ending(t, view) {
     if (t.status === "stopped") return [h("span", { class: "end-note", text: "Stopped" })];
     if (t.status === "cut" || t.status === "error") {
       const err = t.error || {};
@@ -559,7 +592,32 @@
       const title = err.title || (cut ? "The conversation ran out of room." : "Something went wrong with this answer.");
       const hint = err.hint || (cut ? "Start a new chat or increase the context size." : "Try again.");
       const acts = [];
-      if (cut) acts.push(h("button", { class: "btn btn-secondary btn-small", type: "button", onclick: newChat }, "New chat"));
+      if (cut) {
+        // One click to the next context size, with the question back in the box.
+        const choices = (S.settings && S.settings.context_choices) || [];
+        const now = t.context || (S.settings && S.settings.context_size) || 0;
+        const next = choices.find((c) => c > Math.max(now, (S.settings && S.settings.context_size) || 0));
+        if (next)
+          acts.push(
+            h(
+              "button",
+              {
+                class: "btn btn-primary btn-small",
+                type: "button",
+                onclick: () => {
+                  run("set_context", { value: next });
+                  input.value = t.user;
+                  input.dispatchEvent(new Event("input"));
+                  input.focus();
+                },
+              },
+              `Use ${fmt.num(next)} tokens and ask again`
+            )
+          );
+        // "New chat" helps only when earlier messages fill the context.
+        const first = view && turnsEl.querySelector(".turn") === view.el;
+        if (!first) acts.push(h("button", { class: "btn btn-secondary btn-small", type: "button", onclick: newChat }, "New chat"));
+      }
       let detail = null;
       if (err.detail) {
         const id = "detail-" + t.id;
@@ -698,7 +756,16 @@
     }
   }
 
-  function newChat() {
+  async function newChat() {
+    if (S.generating) {
+      const ok = await confirmBox({
+        title: "Start a new chat?",
+        text: "The model is still answering. The answer so far will be lost.",
+        ok: "Start a new chat",
+        danger: true,
+      });
+      if (!ok) return;
+    }
     run("new_chat");
     input.focus();
   }
@@ -908,7 +975,10 @@
               (d.status === "running" || d.status === "retrying") && b("Pause", "download_pause", "p"),
               d.status === "paused" && b("Resume", "download_resume", "r"),
               d.status === "failed" && b("Try again", "download_resume", "r"),
-              d.status !== "verifying" && d.status !== "done" && h("button", { class: "btn btn-quiet btn-small", type: "button", "data-key": "c" + d.id, "aria-label": `Cancel ${d.dest_file}`, onclick: () => run("download_cancel", { id: d.id }) }, "Cancel"),
+              d.status !== "verifying" && d.status !== "done" && h("button", { class: "btn btn-quiet btn-small", type: "button", "data-key": "c" + d.id, "aria-label": `Cancel ${d.dest_file}`, onclick: async () => {
+                    const ok = await confirmBox({ title: "Cancel this download?", text: `${d.dest_file}: what was downloaded so far will be deleted. To stop for now and go on later, press Pause instead.`, ok: "Cancel the download", danger: true });
+                    if (ok) run("download_cancel", { id: d.id });
+                  } }, "Cancel"),
             ].filter(Boolean)
           );
         });
@@ -990,17 +1060,17 @@
       else if (hub.results && !hub.results.length) results.replaceChildren(h("p", { class: "empty-note", text: `No models found for “${hub.query}”. Try a shorter name.` }));
       else if (hub.results) {
         results.replaceChildren(
-          h("p", { class: "muted", text: "Choose a model to see its files. Look for files in GGUF format with a green dot." }),
+          h("p", { class: "muted", text: "Choose a model to see its files. Models marked “Does not chat” cannot answer questions." }),
           h(
             "ul",
             { class: "hits" },
-            hub.results.map((r) =>
+            [...hub.results.filter((r) => r.chat !== false), ...hub.results.filter((r) => r.chat === false)].map((r) =>
               h(
                 "li",
                 null,
                 h(
                   "button",
-                  { class: "hit", type: "button", "data-key": "hit:" + r.id, onclick: () => openDetails(r.id) },
+                  { class: "hit hub-hit", type: "button", "data-key": "hit:" + r.id, "data-not-chat": r.chat === false ? "" : null, onclick: () => openDetails(r.id) },
                   h("span", { class: "row-name", text: r.id }),
                   h(
                     "span",
@@ -1008,7 +1078,8 @@
                     h("span", { text: `${fmt.num(r.downloads)} downloads` }),
                     h("span", { text: `${fmt.num(r.likes)} likes` }),
                     r.updated && h("span", { text: `Updated ${fmt.date(r.updated)}` }),
-                    r.gated && h("span", { class: "tag tag-rev", text: "Needs an account" })
+                    r.gated && h("span", { class: "tag tag-rev", text: "Needs an account" }),
+                    r.chat === false && h("span", { class: "not-chat", text: "Does not chat" })
                   )
                 )
               )
@@ -1094,10 +1165,18 @@
         fact("Downloads", fmt.num(d.downloads)),
         fact("Likes", fmt.num(d.likes))
       ),
-      d.tags && d.tags.length && h("div", { class: "tags", "aria-label": "Tags" }, d.tags.map((t) => h("span", { class: "tag", text: t }))),
+      d.chat === false &&
+        h(
+          "div",
+          { class: "inline-note take", role: "note" },
+          h("p", { class: "t", text: "This model does not chat." }),
+          h("p", { class: "h", text: "It turns text into numbers, or works with sound. It cannot answer questions in Trurl. Look for a model whose name ends in Instruct or Chat." })
+        ),
+      ...[usefulTags(d.tags)].filter((t) => t.length).map((t) => h("div", { class: "tags", "aria-label": "Tags" }, t.map((x) => h("span", { class: "tag", text: x })))),
       d.gated && !(S.settings && S.settings.has_hf_token) && h("p", { class: "gate-note", text: "This model needs a free Hugging Face account. Ask your teacher to add an access token (Ctrl+Shift+S)." }),
       h("h4", { class: "sub-h", text: "Files" }),
       h("p", { class: "muted", text: "Each file is the same model at a different size. Smaller files are faster and use less memory." }),
+      h("p", { class: "muted quant-legend", text: "The version name says how much the model was squeezed: Q4_K_M keeps about 4 bits per number (small, good: the one to pick); Q8_0 keeps 8 (twice the size, a little more exact)." }),
       h("table", { class: "files" }, h("thead", null, h("tr", null, h("th", { text: "Version" }), h("th", { text: "Size" }), h("th", { text: "Fits this computer?" }), h("th", null, h("span", { class: "sr-only", text: "Action" })))), hubEls.files),
       h("h4", { class: "sub-h", text: "Model card" }),
     ]);
@@ -1106,6 +1185,13 @@
     else card.append(h("p", { class: "muted", text: "This model has no model card." }));
     hubEls.details.append(card);
     renderFiles();
+  }
+
+  // Tags a learner can use (the language, the license); Hugging Face's
+  // technical ones (endpoints_compatible, region:us, base_model:...) are noise.
+  function usefulTags(tags) {
+    const noise = /^(endpoints_compatible|conversational|gguf|region:|base_model:|license:|arxiv:|autotrain|text-generation-inference|imatrix|transformers|safetensors|deploy:|custom_code|template:|dataset:|doi:|model-index|has_space|eval-results|.*-generation$)/;
+    return (tags || []).filter((t) => !noise.test(t)).slice(0, 12);
   }
 
   function renderFiles() {
@@ -1206,7 +1292,7 @@
   }
 
   function openMenu() {
-    if (!S.models.length) return openModels("hub");
+    if (!S.models.length) return openModels("local");
     renderMenu();
     menu.hidden = false;
     $("modelCard").setAttribute("aria-expanded", "true");
@@ -1295,7 +1381,7 @@
       h(
         "dl",
         { class: "about-list" },
-        row("llama.cpp build", h("span", { class: "mono", text: S.llama_build })),
+        row("Model engine", h("span", { class: "mono", text: "llama.cpp " + S.llama_build })),
         row(
           "This computer",
           h("span", { class: "mono", text: `${hw.total_ram ? fmt.ram(hw.total_ram) : "?"} memory · ${hw.physical_cores || "?"} cores · ${VARIANT[hw.variant] || "Compatible"}` }),

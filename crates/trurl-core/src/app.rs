@@ -807,6 +807,9 @@ impl App {
                 status: TurnStatus::Streaming,
                 thought_ms: None,
                 error: None,
+                system_prompt: st.settings.system_prompt.clone(),
+                temperature: st.settings.temperature,
+                context: st.settings.context_size,
             };
             st.turns.push(turn.clone());
             (turn, messages, st.settings.temperature)
@@ -887,6 +890,7 @@ impl App {
             st.generating = false;
             // "New chat" during an answer removes the turn: the answer is over all the same,
             // and the front ends must still hear that nothing is generating any more.
+            let first = st.turns.first().is_some_and(|t| t.id == id);
             st.turns.iter_mut().find(|t| t.id == id).map(|t| {
                 match end {
                     StreamEnd::Done => t.status = TurnStatus::Done,
@@ -903,6 +907,21 @@ impl App {
                         t.status = TurnStatus::Error;
                         t.error = Some(UserError::server_crashed().with_detail(detail));
                     }
+                }
+                // The first message of a chat: "Start a new chat" cannot help.
+                if first
+                    && t.error
+                        .as_ref()
+                        .is_some_and(|e| e.code == crate::errors::ErrorCode::ContextFull)
+                {
+                    let detail = t.error.as_ref().and_then(|e| e.detail.clone());
+                    let mut e = if t.status == TurnStatus::Cut {
+                        UserError::context_full_first()
+                    } else {
+                        UserError::message_too_long()
+                    };
+                    e.detail = detail;
+                    t.error = Some(e);
                 }
                 t.clone()
             })

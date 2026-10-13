@@ -39,6 +39,8 @@ jobs:
       - run: cargo test --locked
       - run: python3 scripts/check_pins.py
       - run: python3 scripts/check_copy.py
+      - name: Math shown as text in the desktop UI (same cases as the terminal app)
+        run: node apps/desktop/ui/plainmath.test.cjs
       - run: python3 scripts/check_network.py
 
   linux:

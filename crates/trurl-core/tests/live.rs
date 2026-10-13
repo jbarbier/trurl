@@ -269,15 +269,51 @@ async fn small_context_runs_out_of_room_with_the_course_message() {
         _ => None,
     })
     .await;
-    // Too long to even start.
+    // Too long to even start, as the first message: "New chat" would not help.
     let long = "word ".repeat(400);
     let t = h.ask(&long).await;
     assert_eq!(t.status, TurnStatus::Error);
-    assert_eq!(t.error.as_ref().unwrap().code, ErrorCode::ContextFull);
-    // Fills up while answering.
+    let e = t.error.as_ref().unwrap();
+    assert_eq!(e.code, ErrorCode::ContextFull);
+    assert_eq!(e.title, "Your message is too long for the context size.");
+    // Fills up while answering, later in the chat: the course's own words.
     let t = h.ask("Count from 1 to 300, one number per line.").await;
     assert_eq!(t.status, TurnStatus::Cut, "{t:?}");
-    assert_eq!(t.error.as_ref().unwrap().code, ErrorCode::ContextFull);
+    let e = t.error.as_ref().unwrap();
+    assert_eq!(
+        format!("{} {}", e.title, e.hint),
+        "The conversation ran out of room. Start a new chat or increase the context size."
+    );
+    assert_eq!(t.context, 256, "the turn remembers the context it ran in");
+    h.app.shutdown().await;
+}
+
+/// Course 1.1.4 with a system prompt (1.2.2): at temperature 0 the same
+/// question gives the same answer, chat after chat, even when an earlier chat
+/// left part of the prompt in llama-server's cache.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn temperature_zero_is_repeatable_with_a_system_prompt() {
+    let h = harness(&[GEMMA], |_| {});
+    h.ready(GEMMA).await;
+    h.app.set_system_prompt("Answer only in French.");
+    h.ask("Say hello in one sentence.").await; // leaves a cached prompt behind
+    h.app.set_temperature(0.0);
+    let mut answers = Vec::new();
+    for _ in 0..3 {
+        h.app.new_chat();
+        let t = h
+            .ask("Give me one name for a cat, and say why in one sentence.")
+            .await;
+        assert_eq!(t.status, TurnStatus::Done);
+        assert_eq!(t.temperature, 0.0);
+        assert_eq!(t.system_prompt, "Answer only in French.");
+        answers.push(t.answer);
+    }
+    assert!(
+        answers.iter().all(|a| *a == answers[0]),
+        "temperature 0 must repeat: {answers:#?}"
+    );
     h.app.shutdown().await;
 }
 

@@ -1,0 +1,20 @@
+[
+  ["The answer is $\\boxed{42}$.", "The answer is 42."],
+  ["\\boxed{3}", "3"],
+  ["$p$ pens \\quad \\text{and} $q$ pencils", "p pens  and q pencils"],
+  ["$\\frac{1}{2} + \\frac{a+b}{c}$", "1/2 + (a+b)/c"],
+  ["$x^2 + y^{10} = z^n$", "x² + y¹⁰ = zⁿ"],
+  ["$\\sqrt{16} = 4$", "√16 = 4"],
+  ["$3 \\times 4 = 12$ and $10 \\div 2 = 5$", "3 × 4 = 12 and 10 ÷ 2 = 5"],
+  ["$$17 + 25 = 42$$", "17 + 25 = 42"],
+  ["\\[ a \\le b \\]", "a ≤ b"],
+  ["\\( \\pi \\approx 3.14 \\)", "π ≈ 3.14"],
+  ["It costs $5 and $10 together.", "It costs $5 and $10 together."],
+  ["Pay $5, then $ 3 more.", "Pay $5, then $ 3 more."],
+  ["$\\left( 2 + 3 \\right) \\cdot 4$", "(2 + 3) · 4"],
+  ["No math here at all.", "No math here at all."],
+  ["$x_1 + x_2$", "x1 + x2"],
+  ["Run `echo $HOME and $PATH` now.", "Run `echo $HOME and $PATH` now."],
+  ["```bash\nprice=$5; echo $price and $HOME\n```", "```bash\nprice=$5; echo $price and $HOME\n```"],
+  ["Solve: $2x = 10$, so $x = 5$.", "Solve: 2x = 10, so x = 5."]
+]

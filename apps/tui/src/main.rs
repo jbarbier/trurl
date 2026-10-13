@@ -332,6 +332,7 @@ async fn on_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: Key
                         ui.screen = Screen::Chat;
                     }
                     Confirm::Update { .. } => start_update(ui, core, tx),
+                    Confirm::NewChat => core.new_chat(),
                 }
             }
             // "Later": hidden until the next start or the next 24-hour check.
@@ -470,7 +471,11 @@ fn edit(ed: &mut text::Editor, k: &KeyEvent, multiline: bool) {
 
 fn chat_key(ui: &mut Ui, core: &App, k: KeyEvent) {
     if ctrl(&k, 'n') {
-        core.new_chat();
+        if ui.generating {
+            ui.confirm = Some(Confirm::NewChat);
+        } else {
+            core.new_chat();
+        }
         return;
     }
     if ctrl(&k, 't') {

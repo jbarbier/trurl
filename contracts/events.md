@@ -73,15 +73,17 @@ EngineState { state: "idle" }
             | { state: "failed", file, name, error }
 ModelInfo   { file, name, quant?, size, fit: "green"|"orange"|"red", bundled, verified?,
               broken, has_chat_template, reasoning_hint, train_context? }
-Turn        { id, user, reasoning, answer, model, status, thought_ms?, error? }
+Turn        { id, user, reasoning, answer, model, status, thought_ms?, error?,
+              system_prompt, temperature, context }   (the settings it was written with)
               status: "streaming" | "done" | "stopped" | "cut" | "error"
 Settings    { system_prompt, temperature, context_size, model?, has_hf_token,
               default_temperature, default_context, context_choices[] }
 Snapshot    { version, llama_build, models_dir, hardware{ total_ram, physical_cores, threads,
               cpu_name, variant }, settings, models[], engine, turns[], generating, downloads[] }
-RepoHit     { id, downloads, likes, gated, updated? }
+RepoHit     { id, downloads, likes, gated, updated?, chat? }
+              chat: false = this model does not chat (embeddings, speech, rerankers)
 RepoDetails { id, author?, revision, gated, license?, downloads, likes, updated?, base_model?,
-              architecture?, context_length?, parameters?, tags[], readme?, files: RepoFile[] }
+              architecture?, context_length?, parameters?, tags[], chat?, readme?, files: RepoFile[] }
 RepoFile    { path, size, sha256?, quant?, fit, split }
 Download    { id, repo, file, revision, dest_file, size, sha256?, done, rate, user_paused, synced,
               status: "running"|"retrying"|"paused"|"verifying"|"failed"|"done", error? }

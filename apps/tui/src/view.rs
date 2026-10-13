@@ -31,7 +31,7 @@ fn fit_span(f: RamFit) -> Vec<Span<'static>> {
 fn status_style(kind: &str) -> Style {
     match kind {
         "ready" => Style::default().fg(Color::Green),
-        "loading" | "thinking" | "answering" => Style::default().fg(Color::Yellow),
+        "loading" | "thinking" | "answering" | "starting" => Style::default().fg(Color::Yellow),
         "failed" => Style::default().fg(Color::Red),
         _ => Style::default().fg(DIM),
     }
@@ -43,6 +43,7 @@ fn status_word(kind: &str) -> &'static str {
         "loading" => "Loading",
         "thinking" => "Thinking",
         "answering" => "Answering",
+        "starting" => "Starting",
         "failed" => "Failed",
         _ => "No model",
     }
@@ -517,10 +518,31 @@ pub fn chat_lines(ui: &Ui, width: usize) -> Vec<Line<'static>> {
                 .fg(Color::Magenta)
                 .add_modifier(Modifier::BOLD),
         )));
+        // What this answer was written with: comparing answers is the lesson.
+        let sp = t.system_prompt.trim();
+        let settings = format!(
+            "temperature {:.1} · {}",
+            t.temperature,
+            if sp.is_empty() {
+                "no system prompt".to_string()
+            } else {
+                format!("system prompt: “{}”", crate::text::clean(sp))
+            }
+        );
+        out.extend(wrap_plain(
+            &settings,
+            width,
+            Style::default().fg(DIM),
+            Span::raw("  "),
+        ));
         if t.answer.is_empty() && t.status == TurnStatus::Streaming && t.reasoning.is_empty() {
             out.push(Line::from(Span::styled("  …", Style::default().fg(DIM))));
         } else {
-            for l in markdown(&t.answer, width.saturating_sub(2), Style::default()) {
+            for l in markdown(
+                &crate::text::plain_math(&t.answer),
+                width.saturating_sub(2),
+                Style::default(),
+            ) {
                 let mut s = vec![Span::raw("  ")];
                 s.extend(l.spans);
                 out.push(Line::from(s));
@@ -1104,6 +1126,11 @@ fn draw_confirm(f: &mut Frame, c: &Confirm, area: Rect) {
         Confirm::Update { version, notes } => {
             return draw_update(f, version, notes, area);
         }
+        Confirm::NewChat => (
+            "Start a new chat?",
+            "The model is still answering. The answer so far will be lost.".to_string(),
+            "Enter: start a new chat",
+        ),
     };
     let r = centered(area, 64, 8);
     f.render_widget(Clear, r);

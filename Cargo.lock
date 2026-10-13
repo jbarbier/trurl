@@ -5125,6 +5125,7 @@ dependencies = [
  "flate2",
  "ratatui",
  "reqwest",
+ "serde_json",
  "tar",
  "tempfile",
  "tokio",

@@ -15,6 +15,9 @@ pub struct RepoHit {
     pub likes: u64,
     pub gated: bool,
     pub updated: Option<String>,
+    /// Some(false): this model does not chat (embeddings, speech, rerankers):
+    /// downloading it would waste a learner's data. None: cannot tell.
+    pub chat: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -45,6 +48,8 @@ pub struct RepoFiles {
     /// Parameter count from the GGUF header, e.g. 751632384.
     pub parameters: Option<u64>,
     pub tags: Vec<String>,
+    /// See `RepoHit::chat`.
+    pub chat: Option<bool>,
     /// The model card (README.md) as Markdown, front matter removed. Filled by `details`.
     pub readme: Option<String>,
     pub files: Vec<RepoFile>,
@@ -61,6 +66,8 @@ struct ApiHit {
     gated: serde_json::Value,
     #[serde(default, rename = "lastModified")]
     last_modified: Option<String>,
+    #[serde(default)]
+    pipeline_tag: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -79,6 +86,8 @@ struct ApiRepo {
     last_modified: Option<String>,
     #[serde(default)]
     tags: Vec<String>,
+    #[serde(default)]
+    pipeline_tag: Option<String>,
     #[serde(default, rename = "cardData")]
     card: Option<serde_json::Value>,
     #[serde(default)]
@@ -174,6 +183,7 @@ impl Hub {
         Ok(hits
             .into_iter()
             .map(|h| RepoHit {
+                chat: chat_kind(h.pipeline_tag.as_deref(), &h.id),
                 id: h.id,
                 downloads: h.downloads,
                 likes: h.likes,
@@ -238,6 +248,49 @@ fn hub_error(e: reqwest::Error) -> UserError {
         crate::net::NetFailure::Tls => UserError::hub_tls().with_detail(detail),
         crate::net::NetFailure::Other => UserError::hub_failed().with_detail(detail),
     }
+}
+
+/// Can this repository's model chat? From Hugging Face's task tag, and, when a
+/// repository has none, from words in its name that mean it cannot.
+pub fn chat_kind(pipeline_tag: Option<&str>, id: &str) -> Option<bool> {
+    const CHAT: &[&str] = &[
+        "text-generation",
+        "image-text-to-text",
+        "conversational",
+        "text2text-generation",
+    ];
+    const NOT_CHAT: &[&str] = &[
+        "feature-extraction",
+        "sentence-similarity",
+        "text-ranking",
+        "text-classification",
+        "token-classification",
+        "automatic-speech-recognition",
+        "text-to-speech",
+        "text-to-audio",
+        "audio-classification",
+        "text-to-image",
+        "image-classification",
+        "zero-shot-classification",
+        "fill-mask",
+        "translation",
+    ];
+    if let Some(t) = pipeline_tag {
+        if CHAT.contains(&t) {
+            return Some(true);
+        }
+        if NOT_CHAT.contains(&t) {
+            return Some(false);
+        }
+    }
+    let name = id.rsplit('/').next().unwrap_or(id).to_ascii_lowercase();
+    let words = [
+        "embed", "rerank", "-asr", "asr-", "tts", "whisper", "-clip", "bge-", "e5-", "minilm",
+    ];
+    if words.iter().any(|w| name.contains(w)) {
+        return Some(false);
+    }
+    None
 }
 
 fn repo_files(r: ApiRepo, total_ram: u64) -> RepoFiles {
@@ -313,6 +366,7 @@ fn repo_files(r: ApiRepo, total_ram: u64) -> RepoFiles {
             .map(str::to_string),
         context_length: g("context_length"),
         parameters: g("total"),
+        chat: chat_kind(r.pipeline_tag.as_deref(), &r.id),
         tags: r
             .tags
             .iter()
@@ -363,6 +417,51 @@ pub fn urlencode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn models_that_cannot_chat_are_marked() {
+        assert_eq!(
+            chat_kind(Some("text-generation"), "Qwen/Qwen3-0.6B-GGUF"),
+            Some(true)
+        );
+        assert_eq!(
+            chat_kind(None, "Qwen/Qwen3-Embedding-0.6B-GGUF"),
+            Some(false)
+        );
+        assert_eq!(
+            chat_kind(
+                Some("automatic-speech-recognition"),
+                "x/Qwen3-ASR-0.6B-gguf"
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            chat_kind(
+                Some("text-ranking"),
+                "ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF"
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            chat_kind(None, "mradermacher/Qwen3-Reranker-0.6B-GGUF"),
+            Some(false)
+        );
+        assert_eq!(
+            chat_kind(None, "unslothai/Qwen3-ASR-0.6B-GGUF"),
+            Some(false)
+        );
+        assert_eq!(
+            chat_kind(
+                Some("text-to-speech"),
+                "cstr/qwen3-tts-0.6b-customvoice-GGUF"
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            chat_kind(None, "bartowski/Llama-3.2-1B-Instruct-GGUF"),
+            None
+        );
+    }
 
     #[test]
     fn parses_a_real_repo_listing() {
