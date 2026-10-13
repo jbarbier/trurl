@@ -34,6 +34,12 @@ pub enum Confirm {
     },
     /// Ctrl+N while the model is still answering.
     NewChat,
+    /// Ctrl+C or Ctrl+Q with a chat on screen.
+    Quit,
+    /// R on the system prompt in Settings.
+    ClearSystemPrompt,
+    /// Esc in the system prompt editor, with changes not saved.
+    DiscardSystemPrompt,
     /// "Update available": the version and its full release notes.
     Update {
         version: String,
@@ -131,6 +137,10 @@ pub struct Ui {
     /// The learner pressed Enter while the model was loading: the message goes
     /// out as soon as it is ready (it stays in the box if loading fails).
     pub queued: bool,
+    /// When `update_msg` was set: short messages ("Token saved.") fade after a while.
+    pub msg_at: Option<std::time::Instant>,
+    /// How far the chat can scroll up, as the last drawing measured it.
+    pub max_scroll: std::cell::Cell<usize>,
     /// Turn ids whose thinking block the learner toggled away from the default.
     pub toggled: HashSet<u64>,
 }
@@ -183,6 +193,8 @@ impl Ui {
             token: Editor::default(),
             quit: false,
             queued: false,
+            msg_at: None,
+            max_scroll: std::cell::Cell::new(0),
             toggled: HashSet::new(),
         }
     }
@@ -249,10 +261,13 @@ impl Ui {
                 self.toggled.clear();
             }
             Event::ImportProgress { file, done, total } => self.import = Some((file, done, total)),
-            Event::ImportFinished { error, .. } => {
+            Event::ImportFinished { file, error } => {
                 self.import = None;
                 if let Some(e) = error {
                     self.notice = Some(e);
+                } else if let Some(f) = file {
+                    self.notice = None;
+                    self.say(format!("Imported {f}. Press F2 to use it."));
                 }
             }
             Event::VerifyProgress { file, done, total } => {
@@ -263,11 +278,30 @@ impl Ui {
                 };
             }
             Event::Downloads { downloads } => {
+                // Gone after the check: it is in the models folder now.
+                let finished: Vec<String> = self
+                    .downloads
+                    .iter()
+                    .filter(|old| {
+                        old.status == trurl_core::downloads::DownloadStatus::Verifying
+                            && !downloads.iter().any(|d| d.id == old.id)
+                    })
+                    .map(|old| old.dest_file.clone())
+                    .collect();
+                for f in finished {
+                    self.say(format!("Downloaded {f}. Press F2 to use it."));
+                }
                 self.downloads = downloads;
                 self.dl_sel = self.dl_sel.min(self.downloads.len().saturating_sub(1));
             }
             Event::Notice { error } => self.notice = Some(error),
         }
+    }
+
+    /// A short message under the chat, faded after 10 seconds.
+    pub fn say(&mut self, m: impl Into<String>) {
+        self.update_msg = Some(m.into());
+        self.msg_at = Some(std::time::Instant::now());
     }
 
     /// Ctrl+T: open every thinking block in the chat, or close them all if

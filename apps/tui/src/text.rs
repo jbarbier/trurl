@@ -86,6 +86,29 @@ fn math_prose(s: &str) -> String {
             i = e + 1;
             continue;
         }
+        // "$ B $" with spaces inside: math only if short and clearly math (a
+        // command, or names of one or two letters), never "$ 5 and $ 10".
+        if b[i] == '$'
+            && (i == 0 || !(b[i - 1].is_alphanumeric() || b[i - 1] == '\\' || b[i - 1] == '$'))
+            && b.get(i + 1) == Some(&' ')
+            && let Some(e) = (i + 2..b.len().min(i + 44))
+                .find(|&k| b[k] == '$' || b[k] == '\n')
+                .filter(|&k| b[k] == '$')
+            && e > i + 2
+            && b[e - 1] == ' '
+            && !b.get(e + 1).is_some_and(|c| c.is_ascii_digit())
+        {
+            let m = text(i + 2, e - 1);
+            let words: Vec<&str> = m
+                .split(|c: char| !c.is_ascii_alphabetic())
+                .filter(|w| !w.is_empty())
+                .collect();
+            if m.contains('\\') || (!words.is_empty() && words.iter().all(|w| w.len() <= 2)) {
+                out.push_str(&convert(&m));
+                i = e + 1;
+                continue;
+            }
+        }
         // The few commands models also write outside math.
         if b[i] == '\\' {
             let word: String = b[i + 1..]
@@ -627,37 +650,126 @@ impl Editor {
     }
 
     /// Lines to draw and the (column, row) of the cursor, wrapping at `width`.
+    /// Rows to draw at `width` columns, wrapped between words like the chat
+    /// (a word longer than the row is cut), and the cursor's (column, row).
     pub fn layout(&self, width: usize) -> (Vec<String>, (u16, u16)) {
         let width = width.max(4);
-        let mut rows: Vec<String> = vec![String::new()];
-        let mut cur = (0u16, 0u16);
-        let mut col = 0usize;
+        let cw = |c: char| UnicodeWidthStr::width(c.encode_utf8(&mut [0; 4]) as &str);
+        // Each row keeps (byte index, char), so the cursor can be found after wrapping.
+        let mut rows: Vec<Vec<(usize, char)>> = vec![Vec::new()];
         for (i, ch) in self.text.char_indices() {
-            if i == self.cursor {
-                cur = (col as u16, (rows.len() - 1) as u16);
-            }
             if ch == '\n' {
-                rows.push(String::new());
-                col = 0;
+                rows.last_mut().unwrap().push((i, '\n'));
+                rows.push(Vec::new());
                 continue;
             }
-            let w = UnicodeWidthStr::width(ch.encode_utf8(&mut [0; 4]) as &str);
-            if col + w > width {
-                rows.push(String::new());
-                col = 0;
+            let row = rows.last_mut().unwrap();
+            let used: usize = row.iter().map(|(_, c)| cw(*c)).sum();
+            if used + cw(ch) > width {
+                // Move the unfinished word down, if the row has a space before it.
+                let tail = match row.iter().rposition(|(_, c)| *c == ' ') {
+                    Some(sp) if sp + 1 < row.len() && ch != ' ' => row.split_off(sp + 1),
+                    _ => Vec::new(),
+                };
+                rows.push(tail);
             }
-            rows.last_mut().unwrap().push(ch);
-            col += w;
+            rows.last_mut().unwrap().push((i, ch));
         }
-        if self.cursor >= self.text.len() {
+        let mut cur = None;
+        for (r, row) in rows.iter().enumerate() {
+            let mut col = 0;
+            for (i, c) in row {
+                if *i == self.cursor {
+                    cur = Some((col as u16, r as u16));
+                }
+                col += cw(*c);
+            }
+        }
+        let cur = cur.unwrap_or_else(|| {
+            // At the very end of the text.
+            let last = rows.len() - 1;
+            let col: usize = rows[last]
+                .iter()
+                .filter(|(_, c)| *c != '\n')
+                .map(|(_, c)| cw(*c))
+                .sum();
             if col >= width {
-                rows.push(String::new());
-                col = 0;
+                rows.push(Vec::new());
+                (0, (last + 1) as u16)
+            } else {
+                (col as u16, last as u16)
             }
-            cur = (col as u16, (rows.len() - 1) as u16);
-        }
+        });
+        let rows = rows
+            .into_iter()
+            .map(|r| {
+                r.into_iter()
+                    .filter(|(_, c)| *c != '\n')
+                    .map(|(_, c)| c)
+                    .collect()
+            })
+            .collect();
         (rows, cur)
     }
+}
+
+/// A Hugging Face model card made readable in a terminal: no HTML tags, no
+/// images, links shown as their text.
+pub fn readable_card(md: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    let mut in_code = false;
+    for line in md.lines() {
+        if line.trim_start().starts_with("```") {
+            in_code = !in_code;
+        }
+        if in_code {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        let mut l = String::new();
+        for ch in line.chars() {
+            match ch {
+                '<' => in_tag = true,
+                '>' if in_tag => in_tag = false,
+                _ if !in_tag => l.push(ch),
+                _ => {}
+            }
+        }
+        // ![alt](url) -> nothing, [text](url) -> text
+        let mut res = String::new();
+        let b: Vec<char> = l.chars().collect();
+        let mut i = 0;
+        while i < b.len() {
+            let image = b[i] == '!' && b.get(i + 1) == Some(&'[');
+            let start = if image { i + 1 } else { i };
+            if b[start] == '['
+                && let Some(close) = (start + 1..b.len()).find(|&k| b[k] == ']')
+                && b.get(close + 1) == Some(&'(')
+                && let Some(end) = (close + 2..b.len()).find(|&k| b[k] == ')')
+            {
+                if !image {
+                    res.extend(&b[start + 1..close]);
+                }
+                i = end + 1;
+                continue;
+            }
+            res.push(b[i]);
+            i += 1;
+        }
+        let res = res
+            .replace("&nbsp;", " ")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">");
+        if res.trim().is_empty() && !line.trim().is_empty() {
+            continue; // a line that was only HTML or images
+        }
+        out.push_str(&res);
+        out.push('\n');
+    }
+    out
 }
 
 pub fn human_size(bytes: u64) -> String {
@@ -685,6 +797,43 @@ pub fn human_duration(ms: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_editor_wraps_between_words() {
+        let mut e = Editor::with("Explain what a language model is, in two short sentences.");
+        e.cursor = e.text.len();
+        let (rows, cur) = e.layout(20);
+        assert!(
+            rows.iter()
+                .all(|r| UnicodeWidthStr::width(r.as_str()) <= 20),
+            "{rows:?}"
+        );
+        assert_eq!(rows[0], "Explain what a ");
+        assert!(rows.iter().all(|r| !r.starts_with(['.', ','])), "{rows:?}");
+        let last = rows.len() - 1;
+        assert_eq!(
+            cur,
+            (
+                UnicodeWidthStr::width(rows[last].as_str()) as u16,
+                last as u16
+            )
+        );
+        // The cursor follows a word moved to the next row.
+        let mut e = Editor::with("aaaa bbbbbb");
+        e.cursor = 6; // inside "bbbbbb"
+        let (rows, cur) = e.layout(8);
+        assert_eq!(rows, vec!["aaaa ", "bbbbbb"]);
+        assert_eq!(cur, (1, 1));
+    }
+
+    #[test]
+    fn model_cards_lose_html_and_links_but_keep_code() {
+        let card = "<p align=\"center\"><img src=\"x.png\"></p>\nSee [Qwen](https://huggingface.co/Qwen) for more. ![logo](l.png)\n```\n<keep> [a](b)\n```";
+        let r = readable_card(card);
+        assert!(!r.contains("<p") && !r.contains("img"), "{r}");
+        assert!(r.contains("See Qwen for more."), "{r}");
+        assert!(r.contains("<keep> [a](b)"), "code stays as written: {r}");
+    }
 
     #[test]
     fn math_reads_as_plain_text_like_the_desktop() {

@@ -178,9 +178,12 @@ shows the version and has **Check for updates**.
 
 ### In a terminal (Linux)
 
-The terminal version has the same features: chat, thinking, the three controls,
-models, Hugging Face search and downloads, updates, licenses. Press **F1** inside it
-for its keys, or see [packaging/linux/README.txt](packaging/linux/README.txt).
+The terminal version has the same features: chat, thinking, the controls, models,
+Hugging Face search and downloads, updates, licenses. Two keys are its own: **F6**
+copies the last answer (and adds it, with the question and settings, to a
+`Trurl notes.txt` file in your Documents folder), and **F5**, after running out of
+room, picks the next context size and puts the question back. Press **F1** inside
+it for all the keys, or see [packaging/linux/README.txt](packaging/linux/README.txt).
 
 ![The terminal version](docs/img/terminal.png)
 
@@ -227,6 +230,11 @@ to run it offline. Method and raw numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.
 - **Uses nothing while it waits:** 0% CPU between questions.
 - **Memory** is within a few percent for all three: almost all of it is the model.
   Trurl's own process adds about 35 MB.
+- **The Windows window** (measured by the Windows smoke test in CI, after one
+  answer with Gemma 3 1B): llama-server 941 MB with the model mapped (277 MB of it
+  private), Microsoft's WebView2 302 MB (108 MB private, its libraries are shared
+  with Edge), `trurl.exe` 25 MB. The window costs about 115 MB of private memory on
+  top of the model; the terminal app costs about 35 MB.
 
 <!-- benchmarks:start -->
 | | App on disk | Load time | First word | Speed | RAM, idle | RAM, answering | CPU, idle |

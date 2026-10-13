@@ -221,7 +221,16 @@ async fn handle(
                 ui.token.insert_str(s.trim());
             }
         }
-        Msg::Resize | Msg::Tick => {}
+        Msg::Resize => {}
+        Msg::Tick => {
+            if ui
+                .msg_at
+                .is_some_and(|t| t.elapsed() > Duration::from_secs(10))
+            {
+                ui.update_msg = None;
+                ui.msg_at = None;
+            }
+        }
         Msg::HubOnline(on) => {
             ui.hub_view = if on {
                 HubView::Search
@@ -333,6 +342,9 @@ async fn on_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: Key
                     }
                     Confirm::Update { .. } => start_update(ui, core, tx),
                     Confirm::NewChat => core.new_chat(),
+                    Confirm::Quit => ui.quit = true,
+                    Confirm::ClearSystemPrompt => core.set_system_prompt(""),
+                    Confirm::DiscardSystemPrompt => ui.prompt = None,
                 }
             }
             // "Later": hidden until the next start or the next 24-hour check.
@@ -348,7 +360,18 @@ async fn on_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: Key
     if let Some((kind, ed)) = ui.prompt.as_mut() {
         let kind = *kind;
         match k.code {
-            KeyCode::Esc => ui.prompt = None,
+            KeyCode::Esc => {
+                let changed = kind == PromptKind::SystemPrompt
+                    && ui
+                        .settings
+                        .as_ref()
+                        .is_some_and(|s| s.system_prompt.trim_end() != ed.text.trim_end());
+                if changed {
+                    ui.confirm = Some(Confirm::DiscardSystemPrompt);
+                } else {
+                    ui.prompt = None;
+                }
+            }
             KeyCode::Char('s')
                 if k.modifiers.contains(KeyModifiers::CONTROL)
                     && kind == PromptKind::SystemPrompt =>
@@ -362,10 +385,10 @@ async fn on_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: Key
                 if !p.is_empty() {
                     let path = std::path::PathBuf::from(expand_home(&p));
                     if path.is_file() {
+                        ui.notice = None;
                         core.import_model(path);
                     } else {
-                        ui.notice =
-                            Some(UserError::import_failed().with_detail(format!("no file at {p}")));
+                        ui.notice = Some(UserError::import_missing(&p));
                     }
                 }
             }
@@ -374,9 +397,13 @@ async fn on_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: Key
         return;
     }
 
-    // Global keys.
+    // Global keys. Ctrl+C is "copy" to most learners: never quit on it without asking.
     if ctrl(&k, 'q') || ctrl(&k, 'c') {
-        ui.quit = true;
+        if ui.turns.is_empty() && !ui.generating {
+            ui.quit = true;
+        } else {
+            ui.confirm = Some(Confirm::Quit);
+        }
         return;
     }
     match k.code {
@@ -470,6 +497,32 @@ fn edit(ed: &mut text::Editor, k: &KeyEvent, multiline: bool) {
 }
 
 fn chat_key(ui: &mut Ui, core: &App, k: KeyEvent) {
+    if k.code == KeyCode::F(6) {
+        copy_last_answer(ui);
+        return;
+    }
+    if k.code == KeyCode::F(5)
+        && let Some(t) = ui.turns.last()
+        && t.error
+            .as_ref()
+            .is_some_and(|e| e.code == trurl_core::ErrorCode::ContextFull)
+    {
+        // The desktop's "Use 512 tokens and ask again": the next size, the same question.
+        let now = ui
+            .settings
+            .as_ref()
+            .map_or(t.context, |s| s.context_size.max(t.context));
+        if let Some(next) = CONTEXT_CHOICES.iter().copied().find(|c| *c > now) {
+            core.set_context(next);
+            ui.input = text::Editor::with(&t.user);
+            ui.say(format!(
+                "Context size {next} tokens. Press Enter to ask again."
+            ));
+        } else {
+            ui.say("This is already the largest context size. Start a new chat (Ctrl+N).");
+        }
+        return;
+    }
     if ctrl(&k, 'n') {
         if ui.generating {
             ui.confirm = Some(Confirm::NewChat);
@@ -516,7 +569,8 @@ fn chat_key(ui: &mut Ui, core: &App, k: KeyEvent) {
             }
             send_input(ui, core);
         }
-        KeyCode::PageUp => ui.scroll += 10,
+        // Bounded by the drawing (view.rs clamps it), so PgDn always moves back.
+        KeyCode::PageUp => ui.scroll = (ui.scroll + 10).min(ui.max_scroll.get()),
         KeyCode::PageDown => ui.scroll = ui.scroll.saturating_sub(10),
         KeyCode::Up if k.modifiers.contains(KeyModifiers::CONTROL) => ui.scroll += 1,
         KeyCode::Down if k.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -525,6 +579,50 @@ fn chat_key(ui: &mut Ui, core: &App, k: KeyEvent) {
         KeyCode::End if ui.input.text.is_empty() => ui.scroll = 0,
         _ => edit(&mut ui.input, &k, false),
     }
+}
+
+/// F6: the last answer, as text, to the clipboard (terminals that allow it)
+/// and to a notes file in the learner's home folder, with what it was asked and
+/// how. The course asks learners to keep answers in their notes.
+fn copy_last_answer(ui: &mut Ui) {
+    use std::io::Write;
+    let Some(t) = ui.turns.iter().rev().find(|t| !t.answer.trim().is_empty()) else {
+        ui.say("There is no answer to copy yet.");
+        return;
+    };
+    let answer = text::plain_math(t.answer.trim());
+    // OSC 52: the terminal puts it on the clipboard (Windows Terminal, most Linux ones).
+    let b64 = {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(answer.as_bytes())
+    };
+    let _ = write!(std::io::stdout(), "\x1b]52;c;{b64}\x07");
+    let _ = std::io::stdout().flush();
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default();
+    let docs = home.join("Documents");
+    let notes = if docs.is_dir() { docs } else { home }.join("Trurl notes.txt");
+    let sp = if t.system_prompt.trim().is_empty() {
+        "no system prompt".to_string()
+    } else {
+        format!("system prompt: {}", t.system_prompt.trim())
+    };
+    let entry = format!(
+        "----- {} · temperature {:.1} · {sp}\nQuestion: {}\n\n{answer}\n\n",
+        t.model,
+        t.temperature,
+        t.user.trim()
+    );
+    let saved = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&notes)
+        .and_then(|mut f| f.write_all(entry.as_bytes()));
+    ui.say(match saved {
+        Ok(()) => format!("Copied. Also added to {}", notes.display()),
+        Err(_) => "Copied (if your terminal allows it).".into(),
+    });
 }
 
 fn send_input(ui: &mut Ui, core: &App) {
@@ -551,7 +649,14 @@ fn settings_key(ui: &mut Ui, core: &App, k: KeyEvent) {
             let up = k.code == KeyCode::Right;
             match field {
                 SettingsField::Temperature => {
-                    core.set_temperature(s.temperature + if up { 0.1 } else { -0.1 })
+                    // From the value on screen, not from the last event: a fast
+                    // run of presses must never lose a step.
+                    let t = ((s.temperature + if up { 0.1 } else { -0.1 }) * 10.0).round() / 10.0;
+                    let t = t.clamp(0.0, 2.0);
+                    if let Some(st) = ui.settings.as_mut() {
+                        st.temperature = t;
+                    }
+                    core.set_temperature(t)
                 }
                 SettingsField::Context => {
                     let cur = ui.pending_context.unwrap_or(s.context_size);
@@ -587,7 +692,10 @@ fn settings_key(ui: &mut Ui, core: &App, k: KeyEvent) {
                 ui.pending_context = None;
                 core.set_context(s.default_context);
             }
-            SettingsField::SystemPrompt => core.set_system_prompt(""),
+            SettingsField::SystemPrompt if !s.system_prompt.is_empty() => {
+                ui.confirm = Some(Confirm::ClearSystemPrompt)
+            }
+            SettingsField::SystemPrompt => {}
             SettingsField::Model => {}
         },
         _ => {}
@@ -782,7 +890,7 @@ fn hub_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: KeyEvent
 }
 
 fn about_key(ui: &mut Ui, tx: &mpsc::UnboundedSender<Msg>, k: KeyEvent) {
-    let n = trurl_core::licenses::all().len();
+    let n = view::tui_licenses().len();
     if ui.license_open.is_some() {
         match k.code {
             KeyCode::Esc => ui.license_open = None,
@@ -804,6 +912,8 @@ fn about_key(ui: &mut Ui, tx: &mpsc::UnboundedSender<Msg>, k: KeyEvent) {
         KeyCode::Esc => ui.screen = Screen::Chat,
         KeyCode::Up => ui.license_sel = ui.license_sel.saturating_sub(1),
         KeyCode::Down => ui.license_sel = (ui.license_sel + 1).min(n - 1),
+        KeyCode::PageDown => ui.about_scroll = ui.about_scroll.saturating_add(10),
+        KeyCode::PageUp => ui.about_scroll = ui.about_scroll.saturating_sub(10),
         KeyCode::Enter => {
             ui.license_open = Some(ui.license_sel);
             ui.about_scroll = 0;

@@ -190,64 +190,120 @@ fn banner_lines(ui: &Ui, width: usize) -> Vec<Line<'static>> {
             width,
             Span::raw(" "),
         ));
+        if let Some(d) = &n.detail {
+            let d: String = crate::text::clean(d).chars().take(200).collect();
+            out.extend(wrap_plain(
+                &format!("Details: {d}"),
+                width,
+                Style::default().fg(DIM),
+                Span::raw(" "),
+            ));
+        }
     }
     out
 }
 
 fn draw_footer(f: &mut Frame, ui: &Ui, area: Rect) {
-    let keys: &[(&str, &str)] = match ui.screen {
+    // (key, what it does, always shown). Whatever does not fit is dropped from
+    // the end of the optional ones, so F1 (all the keys) and quitting never are.
+    let ran_out = ui.turns.last().is_some_and(|t| {
+        t.error
+            .as_ref()
+            .is_some_and(|e| e.code == trurl_core::ErrorCode::ContextFull)
+    });
+    let keys: Vec<(&str, &str, bool)> = match ui.screen {
+        Screen::Chat if ui.generating => vec![
+            ("Esc", "stop", true),
+            ("Ctrl+T", "thinking", false),
+            ("PgUp/PgDn", "scroll", false),
+            ("F1", "keys", true),
+        ],
         Screen::Chat => {
-            if ui.generating {
-                &[
-                    ("Esc", "stop"),
-                    ("Ctrl+T", "show thinking"),
-                    ("PgUp/PgDn", "scroll"),
-                ]
-            } else {
-                &[
-                    ("Enter", "send"),
-                    ("Alt+Enter", "new line"),
-                    ("Ctrl+N", "new chat"),
-                    ("F2", "models"),
-                    ("F3", "settings"),
-                    ("F4", "download"),
-                    ("F1", "help"),
-                    ("Ctrl+Q", "quit"),
-                ]
+            let mut k = vec![("Enter", "send", true)];
+            if ran_out {
+                k.push(("F5", "bigger context", true));
             }
+            k.extend([
+                ("F6", "copy answer", false),
+                ("Ctrl+N", "new chat", false),
+                ("F2", "models", false),
+                ("F3", "settings", false),
+                ("F4", "Hugging Face", false),
+                ("Alt+Enter", "new line", false),
+                ("F1", "keys", true),
+                ("Ctrl+Q", "quit", true),
+            ]);
+            k
         }
-        Screen::Settings => &[
-            ("↑↓", "choose"),
-            ("←→", "change"),
-            ("Enter", "edit or apply"),
-            ("R", "reset"),
-            ("Esc", "back"),
+        Screen::Settings => vec![
+            ("↑↓", "choose", true),
+            ("←→", "change", true),
+            ("Enter", "edit or apply", true),
+            ("R", "reset", false),
+            ("Esc", "back", true),
         ],
-        Screen::Models => &[
-            ("↑↓", "choose"),
-            ("Enter", "use"),
-            ("D", "delete"),
-            ("I", "import"),
-            ("F4", "Hugging Face"),
-            ("Esc", "back"),
+        Screen::Models => vec![
+            ("↑↓", "choose", true),
+            ("Enter", "use", true),
+            ("D", "delete", false),
+            ("I", "import", false),
+            ("F4", "Hugging Face", false),
+            ("Esc", "back", true),
         ],
-        Screen::Hub => &[
-            ("Enter", "search / open / download"),
-            ("Tab", "move"),
-            ("P", "pause/resume"),
-            ("X", "cancel"),
-            ("Esc", "back"),
+        Screen::Hub => match ui.hub_focus {
+            HubFocus::Downloads => vec![
+                ("P", "pause or resume", true),
+                ("X", "cancel", true),
+                ("Tab", "move", true),
+                ("Esc", "back", true),
+            ],
+            HubFocus::Input => vec![
+                ("Enter", "search", true),
+                ("Tab", "go to the list", true),
+                ("Esc", "back", true),
+            ],
+            _ => vec![
+                ("Enter", "open / download", true),
+                ("Tab", "move", true),
+                ("Esc", "back", true),
+            ],
+        },
+        Screen::About if ui.license_open.is_some() => {
+            vec![("PgUp/PgDn", "scroll", true), ("Esc", "back", true)]
+        }
+        Screen::About => vec![
+            ("↑↓", "license", true),
+            ("Enter", "read", true),
+            ("PgUp/PgDn", "scroll", false),
+            ("U", "updates", false),
+            ("Esc", "back", true),
         ],
-        Screen::About => &[
-            ("↑↓", "choose license"),
-            ("Enter", "read"),
-            ("U", "check for updates"),
-            ("Esc", "back"),
+        Screen::Token => vec![
+            ("Enter", "save", true),
+            ("Ctrl+D", "remove", true),
+            ("Esc", "back", true),
         ],
-        Screen::Token => &[("Enter", "save"), ("Ctrl+D", "remove"), ("Esc", "back")],
     };
+    let width = |ks: &[(&str, &str, bool)]| -> usize {
+        ks.iter()
+            .map(|(k, v, _)| {
+                unicode_width::UnicodeWidthStr::width(*k)
+                    + unicode_width::UnicodeWidthStr::width(*v)
+                    + 4
+            })
+            .sum()
+    };
+    let mut keys = keys;
+    while width(&keys) > area.width as usize {
+        match keys.iter().rposition(|(_, _, keep)| !keep) {
+            Some(i) => {
+                keys.remove(i);
+            }
+            None => break,
+        }
+    }
     let mut spans = Vec::new();
-    for (k, v) in keys {
+    for (k, v, _) in &keys {
         spans.push(Span::styled(
             format!(" {k} "),
             Style::default().fg(Color::Black).bg(Color::Gray),
@@ -285,6 +341,7 @@ fn draw_chat(f: &mut Frame, ui: &Ui, area: Rect) {
     let lines = chat_lines(ui, width);
     let visible = parts[0].height as usize;
     let max_scroll = lines.len().saturating_sub(visible);
+    ui.max_scroll.set(max_scroll);
     let scroll = ui.scroll.min(max_scroll);
     let top = lines.len().saturating_sub(visible + scroll);
     let shown: Vec<Line> = lines.into_iter().skip(top).take(visible).collect();
@@ -296,9 +353,11 @@ fn draw_chat(f: &mut Frame, ui: &Ui, area: Rect) {
     if scroll > 0 {
         let tag = " ↓ more below: End to jump to latest ";
         let r = Rect {
-            x: parts[0].right().saturating_sub(tag.len() as u16 + 1),
+            x: parts[0]
+                .right()
+                .saturating_sub(unicode_width::UnicodeWidthStr::width(tag) as u16 + 1),
             y: parts[0].bottom().saturating_sub(1),
-            width: tag.len() as u16,
+            width: unicode_width::UnicodeWidthStr::width(tag) as u16,
             height: 1,
         };
         f.render_widget(
@@ -415,7 +474,12 @@ fn draw_sidebar(f: &mut Frame, ui: &Ui, area: Rect) {
             Style::default().fg(DIM),
         )));
     }
-    f.render_widget(Paragraph::new(l).block(block("Settings")), area);
+    f.render_widget(
+        Paragraph::new(l)
+            .wrap(Wrap { trim: false })
+            .block(block("Settings")),
+        area,
+    );
 }
 
 pub fn chat_lines(ui: &Ui, width: usize) -> Vec<Line<'static>> {
@@ -473,45 +537,6 @@ pub fn chat_lines(ui: &Ui, width: usize) -> Vec<Line<'static>> {
             Span::raw("  "),
         ));
         out.push(Line::from(""));
-        if !t.reasoning.is_empty() {
-            let open = ui.thinking_open(t);
-            let still = t.status == TurnStatus::Streaming && t.answer.is_empty();
-            let label = if still {
-                "Thinking…".to_string()
-            } else if let Some(ms) = t.thought_ms {
-                format!("Thought for {}", human_duration(ms))
-            } else if t.status == TurnStatus::Stopped && t.answer.is_empty() {
-                "Stopped while thinking".to_string()
-            } else if t.status == TurnStatus::Cut && t.answer.is_empty() {
-                "Ran out of room while thinking".to_string()
-            } else if t.status == TurnStatus::Error && t.answer.is_empty() {
-                "Thinking (cut short)".to_string()
-            } else {
-                "Thinking".to_string()
-            };
-            let arrow = if open { "▾" } else { "▸" };
-            let hint = if open {
-                ""
-            } else {
-                "  (Ctrl+T shows thinking)"
-            };
-            out.push(Line::from(vec![
-                Span::styled(
-                    format!("  {arrow} {label}"),
-                    Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
-                ),
-                Span::styled(hint, Style::default().fg(DIM)),
-            ]));
-            if open {
-                out.extend(wrap_plain(
-                    t.reasoning.trim(),
-                    width,
-                    Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
-                    Span::styled("  │ ", Style::default().fg(DIM)),
-                ));
-            }
-            out.push(Line::from(""));
-        }
         out.push(Line::from(Span::styled(
             t.model.clone(),
             Style::default()
@@ -535,6 +560,41 @@ pub fn chat_lines(ui: &Ui, width: usize) -> Vec<Line<'static>> {
             Style::default().fg(DIM),
             Span::raw("  "),
         ));
+        if !t.reasoning.is_empty() {
+            let open = ui.thinking_open(t);
+            let still = t.status == TurnStatus::Streaming && t.answer.is_empty();
+            let label = if still {
+                "Thinking…".to_string()
+            } else if let Some(ms) = t.thought_ms {
+                format!("Thought for {}", human_duration(ms))
+            } else if t.status == TurnStatus::Stopped && t.answer.is_empty() {
+                "Stopped while thinking".to_string()
+            } else if t.status == TurnStatus::Cut && t.answer.is_empty() {
+                "Ran out of room while thinking".to_string()
+            } else if t.status == TurnStatus::Error && t.answer.is_empty() {
+                "Thinking (cut short)".to_string()
+            } else {
+                "Thinking".to_string()
+            };
+            let arrow = if open { "▾" } else { "▸" };
+            let hint = if open { "" } else { "  (Ctrl+T to read it)" };
+            out.push(Line::from(vec![
+                Span::styled(
+                    format!("  {arrow} {label}"),
+                    Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
+                ),
+                Span::styled(hint, Style::default().fg(DIM)),
+            ]));
+            if open {
+                out.extend(wrap_plain(
+                    t.reasoning.trim(),
+                    width,
+                    Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
+                    Span::styled("  │ ", Style::default().fg(DIM)),
+                ));
+            }
+            out.push(Line::from(""));
+        }
         if t.answer.is_empty() && t.status == TurnStatus::Streaming && t.reasoning.is_empty() {
             out.push(Line::from(Span::styled("  …", Style::default().fg(DIM))));
         } else {
@@ -660,7 +720,12 @@ fn draw_settings(f: &mut Frame, ui: &Ui, area: Rect) {
         }
         l.push(Line::from(""));
     }
-    f.render_widget(Paragraph::new(l).block(block("Settings")), area);
+    f.render_widget(
+        Paragraph::new(l)
+            .wrap(Wrap { trim: false })
+            .block(block("Settings")),
+        area,
+    );
 }
 
 // ----- models ----------------------------------------------------------------------
@@ -909,7 +974,7 @@ fn draw_hub_details(f: &mut Frame, ui: &Ui, area: Rect) {
     if let Some(l) = &d.license {
         facts.push(format!("license {l}"));
     }
-    facts.push(format!("{} downloads", d.downloads));
+    facts.push(format!("{} downloads", thousands(d.downloads)));
     if let Some(u) = d.updated.as_deref().and_then(|u| u.get(..10)) {
         facts.push(format!("updated {u}"));
     }
@@ -929,6 +994,16 @@ fn draw_hub_details(f: &mut Frame, ui: &Ui, area: Rect) {
             Style::default().fg(Color::Yellow),
         )));
     }
+    if d.chat == Some(false) {
+        head.push(Line::from(Span::styled(
+            "This model does not chat: it turns text into numbers, or works with sound. Look for a model whose name ends in Instruct or Chat.",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )));
+    }
+    head.push(Line::from(Span::styled(
+        "Each file is the same model at a different size. Q4_K_M is small and good: the one to pick. Q8_0 is twice the size, a little more exact.",
+        Style::default().fg(DIM),
+    )));
     head.push(Line::from(""));
     for (i, file) in d.files.iter().enumerate() {
         let sel = i == ui.hub_file_sel && ui.hub_focus == HubFocus::Files;
@@ -945,6 +1020,7 @@ fn draw_hub_details(f: &mut Frame, ui: &Ui, area: Rect) {
             ),
             Span::styled(format!("{:>8}  ", human_size(file.size)), st),
         ];
+        let dest = file.path.rsplit('/').next().unwrap_or(&file.path);
         if file.split {
             s.push(Span::styled(
                 "split file, not supported",
@@ -952,6 +1028,20 @@ fn draw_hub_details(f: &mut Frame, ui: &Ui, area: Rect) {
             ));
         } else {
             s.extend(fit_span(file.fit));
+            if file.quant.as_deref() == Some("Q4_K_M") {
+                s.push(Span::styled(
+                    "  Recommended",
+                    Style::default().fg(Color::Green),
+                ));
+            }
+            if ui.models.iter().any(|m| m.file == dest) {
+                s.push(Span::styled(
+                    "  On this computer",
+                    Style::default().fg(Color::Green),
+                ));
+            } else if ui.downloads.iter().any(|x| x.dest_file == dest) {
+                s.push(Span::styled("  Downloading", Style::default().fg(ACCENT)));
+            }
         }
         s.push(Span::styled(
             format!("   {}", file.path),
@@ -972,13 +1062,26 @@ fn draw_hub_details(f: &mut Frame, ui: &Ui, area: Rect) {
         .readme
         .as_deref()
         .unwrap_or("This model has no description.");
-    let lines = markdown(readme, w, Style::default());
+    let lines = markdown(&crate::text::readable_card(readme), w, Style::default());
     f.render_widget(
         Paragraph::new(lines)
             .scroll((ui.hub_readme_scroll, 0))
             .block(block("Model card (PgUp/PgDn)")),
         rows[1],
     );
+}
+
+/// 324976 -> "324,976".
+pub fn thousands(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 pub fn human_params(p: u64) -> String {
@@ -993,8 +1096,16 @@ pub fn human_params(p: u64) -> String {
 
 // ----- about -----------------------------------------------------------------------
 
+/// The licenses of what the terminal app ships (the desktop's font is not part of it).
+pub fn tui_licenses() -> Vec<trurl_core::licenses::License> {
+    trurl_core::licenses::all()
+        .into_iter()
+        .filter(|l| !l.name.contains("Sora"))
+        .collect()
+}
+
 fn draw_about(f: &mut Frame, ui: &Ui, area: Rect) {
-    let licenses = trurl_core::licenses::all();
+    let licenses = tui_licenses();
     if let Some(i) = ui.license_open {
         let lic = &licenses[i.min(licenses.len() - 1)];
         f.render_widget(
@@ -1022,7 +1133,36 @@ fn draw_about(f: &mut Frame, ui: &Ui, area: Rect) {
             "Run open-weight language models on your own computer, without internet, and see how they work.",
         ),
         Line::from(""),
+        Line::from(Span::styled(
+            "Keys",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
     ];
+    for (k, v) in [
+        ("Enter", "send your message"),
+        ("Alt+Enter, Shift+Enter, Ctrl+J", "new line"),
+        ("Esc", "stop the answer"),
+        ("Ctrl+N", "new chat"),
+        ("Ctrl+T", "show or hide the model's thinking"),
+        (
+            "F5",
+            "after running out of room: a bigger context, same question",
+        ),
+        ("F6", "copy the last answer (also saved in your notes file)"),
+        ("Ctrl+R", "load the model again"),
+        ("PgUp/PgDn", "scroll"),
+        ("F2", "models: use, import, delete"),
+        ("F3", "settings: system prompt, temperature, context size"),
+        ("F4", "Hugging Face (needs internet)"),
+        ("F12", "Hugging Face token (only for gated models)"),
+        ("Ctrl+Q", "quit"),
+    ] {
+        l.push(Line::from(vec![
+            Span::styled(format!("  {k:<32}"), Style::default().fg(ACCENT)),
+            Span::raw(v),
+        ]));
+    }
+    l.push(Line::from(""));
     if let Some(h) = &ui.hardware {
         let tier = match h.variant {
             CpuVariant::Avx2 => "AVX2",
@@ -1062,12 +1202,11 @@ fn draw_about(f: &mut Frame, ui: &Ui, area: Rect) {
             },
         )));
     }
-    l.push(Line::from(""));
-    l.push(Line::from(Span::styled("Keys: Enter send · Alt+Enter new line · Esc stop · Ctrl+N new chat · Ctrl+T show or hide thinking · Ctrl+R reload model · PgUp/PgDn scroll · F2 models · F3 settings · F4 Hugging Face · Ctrl+Q quit", Style::default().fg(DIM))));
     f.render_widget(
         Paragraph::new(l)
             .wrap(Wrap { trim: false })
-            .block(block("About Trurl")),
+            .scroll((ui.about_scroll, 0))
+            .block(block("About Trurl (PgUp/PgDn to scroll)")),
         area,
     );
 }
@@ -1130,6 +1269,21 @@ fn draw_confirm(f: &mut Frame, c: &Confirm, area: Rect) {
             "Start a new chat?",
             "The model is still answering. The answer so far will be lost.".to_string(),
             "Enter: start a new chat",
+        ),
+        Confirm::Quit => (
+            "Quit Trurl?",
+            "This chat will be lost. To keep an answer, press Esc, then F6 to copy it.".to_string(),
+            "Enter: quit",
+        ),
+        Confirm::ClearSystemPrompt => (
+            "Clear the system prompt?",
+            "The model will get no instructions before your messages.".to_string(),
+            "Enter: clear it",
+        ),
+        Confirm::DiscardSystemPrompt => (
+            "Leave without saving?",
+            "Your changes to the system prompt will be lost. Ctrl+S saves them.".to_string(),
+            "Enter: leave without saving",
         ),
     };
     let r = centered(area, 64, 8);

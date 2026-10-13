@@ -159,6 +159,16 @@ impl UserError {
         )
     }
 
+    /// A path typed in the terminal app's import box that leads to no file.
+    pub fn import_missing(path: &str) -> Self {
+        Self::new(
+            ErrorCode::ImportFailed,
+            "There is no file there.",
+            "Check the spelling of the path. Tip: drag the file into this window to paste its path.",
+        )
+        .with_detail(path.to_string())
+    }
+
     pub fn busy() -> Self {
         Self::new(
             ErrorCode::Busy,
@@ -360,6 +370,7 @@ mod tests {
             UserError::context_full(),
             UserError::context_full_first(),
             UserError::message_too_long(),
+            UserError::import_missing("/x.gguf"),
             UserError::busy(),
             UserError::offline(),
             UserError::hub_failed(),

@@ -85,7 +85,7 @@ How the build is picked and kept honest:
 | `--reasoning-format deepseek` | Reasoning in its own field. |
 | `--no-webui --offline` | Nothing else listens, nothing reaches the network. |
 | `--host 127.0.0.1 --port <free port>` | This computer only. |
-| `--api-key-file <file>` | A random key, in a file readable only by this user and deleted on stop: command lines are visible to other users. |
+| `--api-key-file <file>` | A random key, in a file readable only by this user and deleted on stop: command lines are visible to other users. The file is in `run/` beside the models folder (never in it: learners open that folder), passed as a relative path so it stays ASCII. |
 
 **Sampling** is llama.cpp's default, plus the learner's temperature. We measured
 Qwen3 0.6B on 9 thinking questions at the 2,048 context:

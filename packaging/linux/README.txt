@@ -28,6 +28,9 @@ Keys inside Trurl:
     Esc                stop the answer
     Ctrl+N             new chat
     Ctrl+T             show or hide the model's thinking (every answer)
+    F6                 copy the last answer; it is also added, with the question
+                       and settings, to "Trurl notes.txt" in your Documents folder
+    F5                 after "ran out of room": the next context size, same question
     Ctrl+R             load the model again (after an error)
     PgUp / PgDn        scroll the conversation
     F2                 models (use, import, delete)

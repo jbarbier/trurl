@@ -78,6 +78,8 @@ async fn check_update(app: &AppHandle, d: &Desktop, manual: bool) -> Result<Valu
             Ok(info)
         }
         Ok(None) => Ok(Value::Null),
+        // No release published yet: there is nothing newer, which is not a failure.
+        Err(e) if e.to_string().contains("404") => Ok(Value::Null),
         Err(e) => Err(UserError::update_check_failed().with_detail(e.to_string())),
     }
 }

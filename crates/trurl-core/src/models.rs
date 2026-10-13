@@ -111,10 +111,21 @@ fn describe(
 
 /// "Gemma 3 1b It" style names are ugly; prefer general.name, fall back to the file name.
 pub fn display_name(g: &GgufInfo, file: &str) -> String {
-    let base = g
-        .name
-        .clone()
-        .unwrap_or_else(|| file.trim_end_matches(".gguf").replace(['_', '-'], " "));
+    let from_file = || file.trim_end_matches(".gguf").replace(['_', '-'], " ");
+    let base = match g.name.as_deref().map(str::trim) {
+        // A "name" that only repeats the architecture ("llama") says nothing.
+        Some(n)
+            if g.architecture
+                .as_deref()
+                .is_some_and(|a| a.eq_ignore_ascii_case(n)) =>
+        {
+            from_file()
+        }
+        // Some conversion scripts name the model after its folder: "Models Qwen Qwen3 0.6B".
+        Some(n) if n.starts_with("Models ") && n.len() > 7 => n[7..].to_string(),
+        Some(n) => n.to_string(),
+        None => from_file(),
+    };
     match &g.size_label {
         Some(l) if !base.to_ascii_lowercase().contains(&l.to_ascii_lowercase()) => {
             format!("{base} {l}")
@@ -360,6 +371,34 @@ impl VerifiedCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_names_a_learner_can_read() {
+        let g = |name: Option<&str>, arch: &str| GgufInfo {
+            name: name.map(str::to_string),
+            architecture: Some(arch.into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            display_name(&g(Some("llama"), "llama"), "stories260K-f32.gguf"),
+            "stories260K f32"
+        );
+        assert_eq!(
+            display_name(
+                &g(Some("Models Qwen Qwen3 0.6B"), "qwen3"),
+                "Qwen_Qwen3-0.6B-Q2_K.gguf"
+            ),
+            "Qwen Qwen3 0.6B"
+        );
+        assert_eq!(
+            display_name(&g(Some("Gemma 3 1B Instruct"), "gemma3"), "x.gguf"),
+            "Gemma 3 1B Instruct"
+        );
+        assert_eq!(
+            display_name(&g(None, "gemma3"), "my-model.gguf"),
+            "my model"
+        );
+    }
     use crate::gguf::testfile;
 
     const GB: u64 = 1 << 30;

@@ -125,6 +125,10 @@ pub async fn check(
         .send()
         .await
         .map_err(|e| UserError::update_check_failed().with_detail(e.to_string()))?;
+    // No release published yet (or none for this platform): nothing newer exists.
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
     if !resp.status().is_success() {
         return Err(UserError::update_check_failed().with_detail(format!("HTTP {}", resp.status())));
     }

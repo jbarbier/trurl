@@ -204,7 +204,18 @@ pub struct Server {
 /// removed at start by `remove_stale_key_files`.
 const KEY_PREFIX: &str = ".trurl-llama-";
 
+/// `<data folder>/run`, beside `models/`.
+pub fn key_dir(models_dir: &Path) -> PathBuf {
+    models_dir.parent().unwrap_or(models_dir).join("run")
+}
+
 pub fn remove_stale_key_files(models_dir: &Path) {
+    // Older versions wrote them into the models folder itself.
+    remove_keys_in(models_dir);
+    remove_keys_in(&key_dir(models_dir));
+}
+
+fn remove_keys_in(models_dir: &Path) {
     if let Ok(rd) = std::fs::read_dir(models_dir) {
         for e in rd.flatten() {
             if e.file_name().to_string_lossy().starts_with(KEY_PREFIX) {
@@ -252,8 +263,13 @@ impl Server {
         }
         let port = free_port().map_err(|e| UserError::server_start().with_detail(e.to_string()))?;
         let api_key = random_key();
-        let key_name = format!("{KEY_PREFIX}{port}.key");
-        let key_file = cfg.models_dir.join(&key_name);
+        // Next to the models folder, not in it (learners open that folder). The
+        // path stays relative to llama-server's working directory, so it stays
+        // ASCII whatever the user name.
+        let key_dir = key_dir(&cfg.models_dir);
+        let _ = std::fs::create_dir_all(&key_dir);
+        let key_name = format!("../run/{KEY_PREFIX}{port}.key");
+        let key_file = key_dir.join(format!("{KEY_PREFIX}{port}.key"));
         write_private(&key_file, &api_key)
             .map_err(|e| UserError::server_start().with_detail(e.to_string()))?;
         let mut cmd = Command::new(&exe);

@@ -110,9 +110,18 @@
       .replace(/\\\[([\s\S]+?)\\\]/g, (_, m) => convert(m))
       .replace(/\\\(([\s\S]+?)\\\)/g, (_, m) => convert(m))
       .replace(/(^|[^\\$\w])\$(?=\S)([^$\n]*?\S)\$(?!\d)/g, (_, pre, m) => pre + convert(m))
+      // "$ B $" with spaces inside: math only if short and clearly math (a
+      // command, or names of one or two letters), never "$ 5 and $ 10".
+      .replace(/(^|[^\\$\w])\$ ([^$\n]{1,40}?) \$(?!\d)/g, (all, pre, m) => (spacedIsMath(m) ? pre + convert(m) : all))
       // The few commands models also write outside math.
       .replace(/\\(?:boxed|text|textbf)\{[^{}]*\}/g, (m) => convert(m))
       .replace(/\\q?quad\b ?/g, " ");
+  }
+
+  function spacedIsMath(m) {
+    if (m.includes("\\")) return true;
+    const words = m.match(/[A-Za-z]+/g) || [];
+    return words.length > 0 && words.every((w) => w.length <= 2);
   }
 
   // Code is left exactly as written: `$HOME` in a shell example is not math.

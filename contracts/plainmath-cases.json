@@ -16,5 +16,8 @@
   ["$x_1 + x_2$", "x1 + x2"],
   ["Run `echo $HOME and $PATH` now.", "Run `echo $HOME and $PATH` now."],
   ["```bash\nprice=$5; echo $price and $HOME\n```", "```bash\nprice=$5; echo $price and $HOME\n```"],
-  ["Solve: $2x = 10$, so $x = 5$.", "Solve: 2x = 10, so x = 5."]
+  ["Solve: $2x = 10$, so $x = 5$.", "Solve: 2x = 10, so x = 5."],
+  ["So $ B $ has 3 pens and $ p + q $ is 5.", "So B has 3 pens and p + q is 5."],
+  ["$ \\frac{1}{2} $ of the cake", "1/2 of the cake"],
+  ["It costs $ 5 and $ 10 later.", "It costs $ 5 and $ 10 later."]
 ]
