@@ -15,7 +15,33 @@ pub struct Paths {
     pub home: PathBuf,
 }
 
+#[derive(Debug)]
+pub enum InstanceError {
+    AlreadyRunning,
+    Io(std::io::Error),
+}
+
 impl Paths {
+    /// One Trurl per data folder. Two copies would start two llama-servers (a
+    /// 4 GB laptop cannot hold both), resume the same downloads into the same
+    /// files and remove each other's server key. The lock is the open file:
+    /// it goes away with the process, even after a crash, and is not inherited
+    /// by a restart (`exec` closes it).
+    pub fn lock_instance(&self) -> Result<std::fs::File, InstanceError> {
+        std::fs::create_dir_all(&self.home).map_err(InstanceError::Io)?;
+        let f = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(self.home.join("trurl.lock"))
+            .map_err(InstanceError::Io)?;
+        match f.try_lock() {
+            Ok(()) => Ok(f),
+            Err(std::fs::TryLockError::WouldBlock) => Err(InstanceError::AlreadyRunning),
+            Err(std::fs::TryLockError::Error(e)) => Err(InstanceError::Io(e)),
+        }
+    }
+
     pub fn from_env() -> Self {
         if let Some(h) = std::env::var_os("TRURL_HOME").filter(|v| !v.is_empty()) {
             return Self {
@@ -98,6 +124,18 @@ pub fn server_exe_name() -> &'static str {
 /// A file name that is safe on every OS: no separators, no `..`, no reserved
 /// Windows names, no control characters, ASCII only (llama.cpp and some Windows
 /// tools still mishandle non-ASCII paths). Keeps the `.gguf` extension.
+/// A bare `.gguf` file name: no folder, no `..`, no drive, nothing hidden.
+pub fn is_plain_model_name(file: &str) -> bool {
+    let p = Path::new(file);
+    file.to_ascii_lowercase().ends_with(".gguf")
+        && !file.contains(['/', '\\', ':'])
+        && !file.starts_with('.')
+        && matches!(
+            p.components().collect::<Vec<_>>().as_slice(),
+            [std::path::Component::Normal(_)]
+        )
+}
+
 pub fn safe_model_file_name(original: &str) -> Option<String> {
     let base = original.rsplit(['/', '\\']).next()?.trim();
     let stem = base
@@ -151,6 +189,39 @@ pub fn is_direct_child(dir: &Path, p: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_plain_model_names_can_be_loaded() {
+        assert!(is_plain_model_name("gemma-3-1b-it-Q4_K_M.gguf"));
+        assert!(is_plain_model_name("Modèle été.gguf"));
+        for bad in [
+            "../secret.gguf",
+            "/etc/x.gguf",
+            "C:\\Windows\\x.gguf",
+            "sub/x.gguf",
+            "..",
+            ".hidden.gguf",
+            "x.bin",
+            "C:x.gguf",
+        ] {
+            assert!(!is_plain_model_name(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_second_trurl_on_the_same_folder_is_refused_until_the_first_closes() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = Paths {
+            home: dir.path().to_path_buf(),
+        };
+        let first = p.lock_instance().unwrap();
+        assert!(matches!(
+            p.lock_instance(),
+            Err(InstanceError::AlreadyRunning)
+        ));
+        drop(first);
+        assert!(p.lock_instance().is_ok());
+    }
 
     #[test]
     fn layout() {

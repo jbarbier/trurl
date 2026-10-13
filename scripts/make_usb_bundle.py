@@ -59,6 +59,32 @@ def download(url: str, dest: Path) -> None:
     tmp.replace(dest)
 
 
+def release_sums(v: str) -> dict[str, str]:
+    """SHA256SUMS.txt of the GitHub release: what every file on the stick must match."""
+    url = f"https://github.com/{REPO}/releases/download/v{v}/SHA256SUMS.txt"
+    with urllib.request.urlopen(url, timeout=60) as r:
+        text = r.read(1 << 20).decode()
+    sums = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) == 2:
+            sums[parts[1].lstrip("*")] = parts[0].lower()
+    return sums
+
+
+def check(path: Path, sums: dict[str, str]) -> None:
+    """Every learner who installs from this stick runs this file: it must be the
+    one the release workflow built and signed, bit for bit."""
+    want = sums.get(path.name)
+    if not want:
+        sys.exit(f"{path.name} is not listed in the release's SHA256SUMS.txt")
+    got = sha256(path)
+    if got != want:
+        path.unlink()
+        sys.exit(f"{path.name} does not match the release (sha256 {got}, expected {want}). Deleted it; run again.")
+    print(f"ok   {path.name} matches the release")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--installer", help="offline setup .exe (default: download from the GitHub release)")
@@ -75,16 +101,21 @@ def main() -> None:
     (out / "models").mkdir(parents=True, exist_ok=True)
 
     exe_name = f"Trurl_{v}_x64-offline-setup.exe"
+    release = None if a.installer and not a.linux else release_sums(v)
     if a.installer:
         shutil.copy2(a.installer, out / exe_name)
-    elif not (out / exe_name).exists():
-        download(f"https://github.com/{REPO}/releases/download/v{v}/{exe_name}", out / exe_name)
+        print(f"note {exe_name} is your own build: not checked against a release")
+    else:
+        if not (out / exe_name).exists():
+            download(f"https://github.com/{REPO}/releases/download/v{v}/{exe_name}", out / exe_name)
+        check(out / exe_name, release)
 
     if a.linux:
         (out / "linux").mkdir(exist_ok=True)
         tgz = f"trurl-{v}-linux-x64.tar.gz"
         if not (out / "linux" / tgz).exists():
             download(f"https://github.com/{REPO}/releases/download/v{v}/{tgz}", out / "linux" / tgz)
+        check(out / "linux" / tgz, release)
 
     # Models: fetch into the cache once (resumable, hash-checked), then copy.
     ids = [m["id"] for m in PINS["models"]] if not a.only else [x.strip() for x in a.only.split(",")]

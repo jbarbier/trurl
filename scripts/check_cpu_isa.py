@@ -8,9 +8,21 @@ instructions that would crash an older CPU with "illegal instruction":
   avx     may use AVX, but no AVX2 integer ops, FMA or F16C: Sandy/Ivy Bridge
   avx2    may use AVX2 + FMA + F16C, but no AVX-512 (zmm registers)
 
-Needs `objdump` (binutils; on Windows it ships with Git for Windows / MSYS2).
+Two modes:
 
   python3 scripts/check_cpu_isa.py vendor/llama/linux
+      the finished executables (Linux: libstdc++ and libgcc are linked in and
+      must follow the rule too)
+
+  python3 scripts/check_cpu_isa.py --objects ~/.cache/trurl/build-windows-<commit>
+      llama.cpp's own compiled libraries for each tier (Windows): the static
+      Microsoft C runtime inside the .exe carries FMA/AVX versions of math and
+      memcpy routines that it only uses after checking the CPU at run time, so
+      on Windows the executables are proven by scripts/check_cpu_emulated.py
+      (Intel SDE runs each build on an emulated older CPU) and the code we
+      compile is proven here.
+
+Needs `objdump` (binutils), or `llvm-objdump` via OBJDUMP=... on Windows.
 """
 
 from __future__ import annotations
@@ -52,15 +64,32 @@ def scan(exe: Path) -> Counter:
     return counts
 
 
+def objects(build_root: Path, variant: str) -> list[Path]:
+    d = build_root / variant
+    return sorted(p for p in d.rglob("*") if p.suffix.lower() in (".lib", ".a", ".obj", ".o") and p.is_file())
+
+
 def main() -> int:
-    root = Path(sys.argv[1] if len(sys.argv) > 1 else "vendor/llama/linux")
+    args = [a for a in sys.argv[1:] if a != "--objects"]
+    object_mode = "--objects" in sys.argv
+    root = Path(args[0] if args else "vendor/llama/linux").expanduser()
     bad = 0
     for variant, forbidden in FORBIDDEN.items():
-        exe = next((p for p in [root / variant / "llama-server", root / variant / "llama-server.exe"] if p.exists()), None)
-        if not exe:
-            print(f"skip {variant}: not built")
-            continue
-        c = scan(exe)
+        if object_mode:
+            files = objects(root, variant)
+            if not files:
+                print(f"skip {variant}: no build folder under {root}")
+                continue
+            c = Counter()
+            for f in files:
+                c.update(scan(f))
+            exe = root / variant
+        else:
+            exe = next((p for p in [root / variant / "llama-server", root / variant / "llama-server.exe"] if p.exists()), None)
+            if not exe:
+                print(f"skip {variant}: not built")
+                continue
+            c = scan(exe)
         found = {k: c[k] for k in forbidden if c[k]}
         summary = ", ".join(f"{k}={c[k]}" for k in PATTERNS)
         if found:

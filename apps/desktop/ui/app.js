@@ -524,8 +524,31 @@
 
     if (p.status !== t.status) {
       p.status = t.status;
-      view.end.replaceChildren(...ending(t));
+      view.end.replaceChildren(...ending(t), ...copyButton(view));
     }
+  }
+
+  // Learners copy answers into their notes (course 1.4.4): one click, the text as written.
+  function copyButton(view) {
+    const t = view.turn;
+    if (t.status === "streaming" || !t.answer) return [];
+    const btn = h("button", { class: "link-btn copy-btn", type: "button", "aria-label": "Copy this answer" }, "Copy");
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(view.turn.answer);
+        btn.textContent = "Copied";
+      } catch {
+        // No clipboard access: select the answer so Ctrl+C copies it.
+        const r = document.createRange();
+        r.selectNodeContents(view.ans);
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+        btn.textContent = "Selected: press Ctrl+C";
+      }
+      setTimeout(() => (btn.textContent = "Copy"), 2500);
+    });
+    return [btn];
   }
 
   function ending(t) {

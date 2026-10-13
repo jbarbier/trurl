@@ -67,6 +67,43 @@ pub fn is_newer(candidate: &str, current: &str) -> bool {
     false
 }
 
+/// How often a running Trurl looks for a new version.
+pub const CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
+/// The first check waits for the model to load: nothing touches the network
+/// while the learner's first answer is on its way.
+pub const FIRST_CHECK_AFTER: Duration = Duration::from_secs(15);
+/// How often the schedule looks at the clock. Short, so a laptop that slept
+/// through the 24 hours checks soon after it wakes up.
+pub const SCHEDULE_TICK: Duration = Duration::from_secs(10 * 60);
+
+/// When to check for updates: once at start, then every 24 hours of wall-clock
+/// time (a timer would stop while the laptop sleeps). Both apps use this, so
+/// "Later" means the same everywhere: the offer comes back at the next start or
+/// the next 24-hour check, never sooner.
+#[derive(Debug, Default, Clone)]
+pub struct CheckSchedule {
+    last: Option<std::time::SystemTime>,
+}
+
+impl CheckSchedule {
+    pub fn due(&self, now: std::time::SystemTime) -> bool {
+        match self.last {
+            None => true,
+            Some(last) => match now.duration_since(last) {
+                Ok(d) => d >= CHECK_EVERY,
+                // The clock went back (a dead CMOS battery, a time zone fix): do
+                // not wait for it to catch up again.
+                Err(_) => true,
+            },
+        }
+    }
+
+    /// A check ran (online or not: offline is skipped silently until the next one).
+    pub fn checked(&mut self, now: std::time::SystemTime) {
+        self.last = Some(now);
+    }
+}
+
 pub fn platform_key() -> &'static str {
     if cfg!(windows) {
         "windows-x86_64"
@@ -91,10 +128,9 @@ pub async fn check(
     if !resp.status().is_success() {
         return Err(UserError::update_check_failed().with_detail(format!("HTTP {}", resp.status())));
     }
-    let m: Manifest = resp
-        .json()
+    let m: Manifest = crate::net::json_limited(resp, 1024 * 1024)
         .await
-        .map_err(|e| UserError::update_check_failed().with_detail(e.to_string()))?;
+        .map_err(|e| UserError::update_check_failed().with_detail(e))?;
     Ok(pick(&m, current, platform_key()))
 }
 
@@ -147,6 +183,9 @@ pub fn verify(
     Ok(())
 }
 
+/// No Trurl release comes near this (about 30 MB); a bigger reply is not one.
+pub const MAX_UPDATE_BYTES: u64 = 300 * 1024 * 1024;
+
 /// Download the update and verify it. Returns the verified bytes.
 pub async fn download(
     http: &reqwest::Client,
@@ -154,21 +193,35 @@ pub async fn download(
     mut progress: impl FnMut(u64, Option<u64>),
 ) -> Result<Vec<u8>, UserError> {
     use futures_util::StreamExt;
-    let resp = http
-        .get(&info.url)
-        .timeout(Duration::from_secs(600))
-        .send()
+    // No limit on the whole download (a 30 MB update takes 10 minutes at 400
+    // kbit/s): it fails only when nothing arrives for a minute.
+    let quiet = Duration::from_secs(60);
+    let failed = |d: String| UserError::update_failed().with_detail(d);
+    let resp = tokio::time::timeout(quiet, http.get(&info.url).send())
         .await
-        .map_err(|e| UserError::update_failed().with_detail(e.to_string()))?;
+        .map_err(|_| failed("no answer for a minute".into()))?
+        .map_err(|e| failed(e.to_string()))?;
     if !resp.status().is_success() {
-        return Err(UserError::update_failed().with_detail(format!("HTTP {}", resp.status())));
+        return Err(failed(format!("HTTP {}", resp.status())));
     }
     let total = resp.content_length();
+    if total.is_some_and(|t| t > MAX_UPDATE_BYTES) {
+        return Err(failed(format!(
+            "the update is {total:?} bytes, more than any Trurl release"
+        )));
+    }
     let mut buf = Vec::with_capacity(total.unwrap_or(0) as usize);
     let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| UserError::update_failed().with_detail(e.to_string()))?;
+    loop {
+        let next = tokio::time::timeout(quiet, stream.next())
+            .await
+            .map_err(|_| failed("no data for a minute".into()))?;
+        let Some(chunk) = next else { break };
+        let chunk = chunk.map_err(|e| failed(e.to_string()))?;
         buf.extend_from_slice(&chunk);
+        if buf.len() as u64 > MAX_UPDATE_BYTES {
+            return Err(failed("the update is larger than any Trurl release".into()));
+        }
         progress(buf.len() as u64, total);
     }
     verify(&buf, &info.signature, PUBKEY, Some(&info.version)).map_err(|e| {
@@ -180,6 +233,27 @@ pub async fn download(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checks_at_start_then_every_24_hours_of_wall_clock() {
+        use std::time::{Duration, SystemTime};
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+        let mut s = CheckSchedule::default();
+        assert!(s.due(t0), "first check at start");
+        s.checked(t0);
+        assert!(!s.due(t0 + Duration::from_secs(60)));
+        assert!(
+            !s.due(t0 + CHECK_EVERY - Duration::from_secs(1)),
+            "\"Later\" holds for 24 h"
+        );
+        assert!(s.due(t0 + CHECK_EVERY));
+        // A laptop asleep for three days checks on the first tick after waking.
+        assert!(s.due(t0 + CHECK_EVERY * 3));
+        // A clock set backwards does not silence checks for days.
+        assert!(s.due(t0 - Duration::from_secs(3600)));
+        s.checked(t0 + CHECK_EVERY);
+        assert!(!s.due(t0 + CHECK_EVERY + SCHEDULE_TICK));
+    }
 
     #[test]
     fn version_order() {

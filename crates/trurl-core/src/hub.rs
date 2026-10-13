@@ -164,14 +164,13 @@ impl Hub {
             .timeout(Duration::from_secs(20))
             .send()
             .await
-            .map_err(|e| UserError::hub_failed().with_detail(e.to_string()))?;
+            .map_err(hub_error)?;
         if !resp.status().is_success() {
             return Err(UserError::hub_failed().with_detail(format!("HTTP {}", resp.status())));
         }
-        let hits: Vec<ApiHit> = resp
-            .json()
+        let hits: Vec<ApiHit> = crate::net::json_limited(resp, MAX_JSON)
             .await
-            .map_err(|e| UserError::hub_failed().with_detail(e.to_string()))?;
+            .map_err(|e| UserError::hub_failed().with_detail(e))?;
         Ok(hits
             .into_iter()
             .map(|h| RepoHit {
@@ -195,16 +194,15 @@ impl Hub {
             .timeout(Duration::from_secs(20))
             .send()
             .await
-            .map_err(|e| UserError::hub_failed().with_detail(e.to_string()))?;
+            .map_err(hub_error)?;
         match resp.status().as_u16() {
             200 => {}
             401 | 403 => return Err(UserError::hub_gated(repo)),
             s => return Err(UserError::hub_failed().with_detail(format!("HTTP {s}"))),
         }
-        let r: ApiRepo = resp
-            .json()
+        let r: ApiRepo = crate::net::json_limited(resp, MAX_JSON)
             .await
-            .map_err(|e| UserError::hub_failed().with_detail(e.to_string()))?;
+            .map_err(|e| UserError::hub_failed().with_detail(e))?;
         Ok(repo_files(r, total_ram))
     }
 
@@ -220,11 +218,24 @@ impl Hub {
         );
         if let Ok(resp) = self.get(url).timeout(Duration::from_secs(15)).send().await
             && resp.status().is_success()
-            && let Ok(text) = resp.text().await
+            && let Ok(bytes) = crate::net::read_limited(resp, MAX_README).await
         {
-            d.readme = Some(clean_readme(&text));
+            d.readme = Some(clean_readme(&String::from_utf8_lossy(&bytes)));
         }
         Ok(d)
+    }
+}
+
+/// Hub replies are a few hundred KB; a repo with thousands of files is a few MB.
+const MAX_JSON: usize = 16 * 1024 * 1024;
+/// Model cards are text; anything this big is not one worth showing.
+const MAX_README: usize = 1024 * 1024;
+
+fn hub_error(e: reqwest::Error) -> UserError {
+    if crate::net::is_offline(&e) {
+        UserError::offline().with_detail(e.to_string())
+    } else {
+        UserError::hub_failed().with_detail(e.to_string())
     }
 }
 

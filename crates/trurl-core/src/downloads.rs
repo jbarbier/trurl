@@ -58,6 +58,10 @@ pub struct DownloadInfo {
     /// carry on by themselves at the next start; paused ones wait for Resume.
     #[serde(default)]
     pub user_paused: bool,
+    /// Bytes of the part file known to be on the disk (synced). After a crash or
+    /// a power cut, Trurl resumes from here.
+    #[serde(default)]
+    pub synced: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -192,10 +196,16 @@ impl Downloads {
             return;
         };
         let mut map = self.inner.entries.lock().unwrap();
+        let mut parts = Vec::new();
         for e in rd.flatten() {
             let p = e.path();
-            if p.extension().and_then(|x| x.to_str()) != Some("json") {
-                continue;
+            match p.extension().and_then(|x| x.to_str()) {
+                Some("part") => {
+                    parts.push(p);
+                    continue;
+                }
+                Some("json") => {}
+                _ => continue,
             }
             let Some(mut info) = std::fs::read_to_string(&p)
                 .ok()
@@ -203,14 +213,40 @@ impl Downloads {
             else {
                 continue;
             };
-            info.done = std::fs::metadata(self.part_path(&info.id))
-                .map(|m| m.len())
-                .unwrap_or(0);
+            // The job file is data on disk, not proof: rebuild what it may name.
+            let base = info.file.rsplit('/').next().unwrap_or(&info.file);
+            match crate::paths::safe_model_file_name(base) {
+                Some(n) => info.dest_file = n,
+                None => continue,
+            }
+            if info.id != download_id(&info.repo, &info.file, &info.revision)
+                || p.file_stem().and_then(|s| s.to_str()) != Some(info.id.as_str())
+            {
+                continue;
+            }
+            // After a power cut the end of the part file may hold bytes that never
+            // reached the disk. Keep only what was synced.
+            let part = self.part_path(&info.id);
+            let len = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+            if len > info.synced
+                && let Ok(f) = std::fs::OpenOptions::new().write(true).open(&part)
+            {
+                let _ = f.set_len(info.synced);
+            }
+            info.done = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+            info.synced = info.done;
             info.rate = 0;
             if info.status != DownloadStatus::Failed {
                 info.status = DownloadStatus::Paused;
             }
             map.insert(info.id.clone(), Entry::new(info));
+        }
+        // A part file with no job left can never be resumed or seen: free the disk.
+        for p in parts {
+            let id = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            if !map.contains_key(id) {
+                let _ = std::fs::remove_file(&p);
+            }
         }
     }
 
@@ -257,10 +293,13 @@ impl Downloads {
             e.info.clone()
         };
         if snapshot.status != DownloadStatus::Done {
-            let _ = std::fs::write(
-                self.job_path(id),
-                serde_json::to_vec(&snapshot).unwrap_or_default(),
-            );
+            // Write then rename: a power cut leaves the old job file or the new
+            // one, never half of one (which restore would have to skip).
+            let path = self.job_path(id);
+            let tmp = path.with_extension("json.tmp");
+            if std::fs::write(&tmp, serde_json::to_vec(&snapshot).unwrap_or_default()).is_ok() {
+                let _ = std::fs::rename(&tmp, &path);
+            }
         }
     }
 
@@ -295,6 +334,7 @@ impl Downloads {
                 error: None,
                 rate: 0,
                 user_paused: false,
+                synced: done,
             };
             map.insert(id.clone(), Entry::new(info));
         }
@@ -450,11 +490,14 @@ impl Downloads {
             }
             match r {
                 Ok(()) => break,
+                // A dropped connection is the normal case here: keep trying, slower
+                // and slower, for as long as Trurl is open. Pause and Cancel still work.
                 Err(e)
                     if e.code == ErrorCode::DownloadFailed
-                        && attempt < self.inner.retry_delays.len() =>
+                        && !self.inner.retry_delays.is_empty() =>
                 {
-                    let delay = self.inner.retry_delays[attempt];
+                    let delays = &self.inner.retry_delays;
+                    let delay = delays[attempt.min(delays.len() - 1)];
                     attempt += 1;
                     self.update(&id, |i| {
                         i.status = DownloadStatus::Retrying;
@@ -549,6 +592,10 @@ impl Downloads {
         };
         let resp = resp.map_err(|e| UserError::download_failed().with_detail(e.to_string()))?;
         let status = resp.status().as_u16();
+        // Nothing on disk is touched until the reply is known to be the right file:
+        // a school proxy that ignores Range, or a web filter page sent with status
+        // 200, must never cost the learner the part already downloaded.
+        let length = resp.content_length();
         let start: u64 = match status {
             206 => {
                 let cr = resp
@@ -559,24 +606,32 @@ impl Downloads {
                 match content_range_start(cr) {
                     // The server may start earlier than asked: write from where it says.
                     Some(s) if s <= have => s,
-                    // Later than asked, or unreadable: we would leave a hole. Start over.
+                    // Later than asked, or unreadable: appending would leave a hole.
                     _ => {
-                        std::fs::write(&part, b"").map_err(|e| {
-                            UserError::from_io_write(&e, UserError::download_failed())
-                        })?;
                         return Err(UserError::download_failed()
                             .with_detail(format!("unexpected Content-Range {cr:?}")));
                     }
                 }
             }
-            200 => 0,
+            // The whole file from the start (the server ignored Range). Accept it
+            // only if it has exactly the expected size, then write it over the
+            // part from byte 0: matching bytes stay as they are.
+            200 => {
+                if info.size > 0 && length != Some(info.size) {
+                    return Err(UserError::download_failed().with_detail(format!(
+                        "HTTP 200 with {length:?} bytes, expected {}",
+                        info.size
+                    )));
+                }
+                0
+            }
             416 => {
-                if info.size > 0 && have >= info.size {
+                // "Nothing left to send": done if the size is unknown or reached;
+                // the check after the download decides if the bytes are right.
+                if info.size == 0 || have >= info.size {
                     return Ok(());
                 }
-                std::fs::write(&part, b"")
-                    .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
-                return Err(UserError::download_failed().with_detail("416 on resume; restarting"));
+                return Err(UserError::download_failed().with_detail("416 on resume"));
             }
             401 | 403 => {
                 return Err(UserError::hub_gated(&info.repo).with_detail(format!("HTTP {status}")));
@@ -590,12 +645,17 @@ impl Downloads {
             .truncate(false)
             .open(&part)
             .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
-        f.set_len(start)
-            .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
         f.seek(SeekFrom::Start(start))
             .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
         let mut done = start;
-        self.update(id, |i| i.done = done);
+        // Bytes known to be on the disk (synced): what a restart after a power cut
+        // may trust. Everything past it is checked again or downloaded again.
+        let mut synced = start.min(info.synced);
+        let mut last_sync = Instant::now();
+        self.update(id, |i| {
+            i.done = done.max(have);
+            i.synced = synced;
+        });
         let mut stream = resp.bytes_stream();
         let mut last_emit = Instant::now();
         let mut window_start = Instant::now();
@@ -604,7 +664,8 @@ impl Downloads {
             let next = tokio::select! {
                 n = stream.next() => n,
                 _ = cancel.cancelled() => {
-                    let _ = f.flush();
+                    let _ = f.sync_data();
+                    self.update(id, |i| i.synced = if done >= have { done } else { synced });
                     return Ok(());
                 }
             };
@@ -614,6 +675,16 @@ impl Downloads {
                         .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
                     done += chunk.len() as u64;
                     window_bytes += chunk.len() as u64;
+                    if last_sync.elapsed() >= Duration::from_secs(5) {
+                        f.sync_data().map_err(|e| {
+                            UserError::from_io_write(&e, UserError::download_failed())
+                        })?;
+                        // Overwriting from an earlier point leaves the old bytes after
+                        // it in place: they count only once they are proven again.
+                        synced = if done >= have { done } else { synced.min(done) };
+                        last_sync = Instant::now();
+                        self.update(id, |i| i.synced = synced);
+                    }
                     if last_emit.elapsed() >= Duration::from_millis(300) {
                         let secs = window_start.elapsed().as_secs_f64().max(0.001);
                         let rate = (window_bytes as f64 / secs) as u64;
@@ -622,7 +693,7 @@ impl Downloads {
                             window_bytes = 0;
                         }
                         self.update(id, |i| {
-                            i.done = done;
+                            i.done = done.max(have);
                             i.rate = rate;
                         });
                         self.emit();
@@ -630,17 +701,27 @@ impl Downloads {
                     }
                 }
                 Some(Err(e)) => {
-                    let _ = f.flush();
-                    self.update(id, |i| i.done = done);
+                    let _ = f.sync_data();
+                    self.update(id, |i| {
+                        i.done = done.max(have);
+                        i.synced = if done >= have { done } else { synced };
+                    });
                     return Err(UserError::download_failed().with_detail(e.to_string()));
                 }
                 None => break,
             }
         }
+        if done < have && (info.size == 0 || done >= info.size) {
+            // A whole file sent over a longer stale part: drop the stale tail.
+            f.set_len(done)
+                .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
+        }
         f.sync_all()
             .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
+        let have_now = done.max(have);
         self.update(id, |i| {
-            i.done = done;
+            i.done = if done >= have { done } else { have_now };
+            i.synced = if done >= have { done } else { synced };
             if i.size == 0 {
                 i.size = done;
             }

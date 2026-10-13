@@ -37,24 +37,37 @@ jobs:
       - name: Build llama-server from the pinned source (no cache)
         run: python scripts/build_llama.py
       - run: python scripts/check_pe_imports.py vendor/llama/windows
-      - name: Each build uses only its CPU tier's instructions
+      - name: llama.cpp's own code uses only its CPU tier's instructions
         env:
           OBJDUMP: C:\Program Files\LLVM\bin\llvm-objdump.exe
-        run: python scripts/check_cpu_isa.py vendor/llama/windows
+        run: |
+          $c = (Get-Content pins.json | ConvertFrom-Json).llama_cpp.commit.Substring(0, 12)
+          python scripts/check_cpu_isa.py --objects "$HOME/.cache/trurl/build-windows-$c"
+          if ($LASTEXITCODE -ne 0) { throw "CPU tier check failed" }
+      - name: Each build answers on an emulated CPU of its tier (Intel SDE)
+        run: |
+          python scripts/fetch_models.py --dest $env:TRURL_TEST_MODELS --test-models
+          if ($LASTEXITCODE -ne 0) { throw "fetch_models failed" }
+          python scripts/check_cpu_emulated.py vendor/llama/windows --model "$env:TRURL_TEST_MODELS/stories260K-f32.gguf"
+          if ($LASTEXITCODE -ne 0) { throw "a build crashed on its oldest CPU" }
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
-      - run: npx --yes @tauri-apps/cli@2.12.2 icon branding/app-icon.svg -o apps/desktop/src-tauri/icons
+      - name: Tauri CLI from its lockfile, then the icons from branding/app-icon.svg
+        working-directory: apps/desktop
+        run: |
+          npm ci --no-audit --no-fund
+          npx --no -- tauri icon ../../branding/app-icon.svg -o src-tauri/icons
       - name: Update installer (small; WebView2 fetched only if missing)
         working-directory: apps/desktop
         run: |
-          npx --yes @tauri-apps/cli@2.12.2 build
+          npx --no -- tauri build -- --locked
           New-Item -ItemType Directory -Force ../../dist | Out-Null
           Copy-Item ../../target/release/bundle/nsis/*-setup.exe ../../dist/
       - name: USB installer (embeds the WebView2 offline installer)
         working-directory: apps/desktop
         run: |
-          npx --yes @tauri-apps/cli@2.12.2 build --config src-tauri/tauri.usb.conf.json
+          npx --no -- tauri build --config src-tauri/tauri.usb.conf.json -- --locked
           $exe = Get-ChildItem ../../target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
           Copy-Item $exe.FullName ("../../dist/" + $exe.Name.Replace("-setup.exe", "-offline-setup.exe"))
       - name: Models for the smoke test
@@ -75,7 +88,9 @@ jobs:
   linux:
     runs-on: ubuntu-24.04
     # Debian 11: glibc 2.31, so the result runs on Ubuntu 20.04+ and Debian 11+.
-    container: debian:bullseye
+    # Debian 11 (glibc 2.31) so the Linux build runs on older distributions too.
+    # Pinned by digest: the tag moves with every Debian point release.
+    container: debian:bullseye@sha256:6f519a81440354a85eb592c5f32109ab80605f6b892455983a6f618bf87fabe9
     steps:
       - run: apt-get update && apt-get install -y --no-install-recommends build-essential ca-certificates curl git python3 ninja-build binutils
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -87,7 +102,10 @@ jobs:
           echo "/opt/cmake-3.31.6-linux-x86_64/bin" >> "$GITHUB_PATH"
       - name: Pinned Rust
         run: |
-          curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+          curl -sSfo /tmp/rustup-init https://static.rust-lang.org/rustup/archive/1.29.1/x86_64-unknown-linux-gnu/rustup-init
+          echo "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71  /tmp/rustup-init" | sha256sum -c -
+          chmod +x /tmp/rustup-init
+          /tmp/rustup-init -y --profile minimal --default-toolchain none
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - name: Toolchain from rust-toolchain.toml
         run: rustup toolchain install
@@ -116,17 +134,22 @@ jobs:
           path: dist
       - name: Version
         run: echo "V=$(python3 -c 'import json;print(json.load(open("pins.json"))["app"]["version"])')" >> "$GITHUB_ENV"
+      - name: Tauri CLI from its lockfile (before any secret is in the environment)
+        run: npm ci --prefix apps/desktop --no-audit --no-fund --ignore-scripts
       - name: Sign the update files (the only step that sees the key)
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          npx --yes @tauri-apps/cli@2.12.2 signer sign --app-version "$V" "dist/Trurl_${V}_x64-setup.exe"
-          npx --yes @tauri-apps/cli@2.12.2 signer sign --app-version "$V" "dist/trurl-${V}-linux-x64.tar.gz"
+          # The CLI comes from apps/desktop/package-lock.json (hash-checked by npm ci),
+          # installed before the key is in the environment: nothing unpinned runs with it.
+          tauri=apps/desktop/node_modules/.bin/tauri
+          "$tauri" signer sign --app-version "$V" "dist/Trurl_${V}_x64-setup.exe"
+          "$tauri" signer sign --app-version "$V" "dist/trurl-${V}-linux-x64.tar.gz"
       - name: Check every signature the way installed copies of Trurl will
         run: |
-          cargo run --quiet -p trurl-core --example verify_update -- "dist/Trurl_${V}_x64-setup.exe" "dist/Trurl_${V}_x64-setup.exe.sig" "$V"
-          cargo run --quiet -p trurl-core --example verify_update -- "dist/trurl-${V}-linux-x64.tar.gz" "dist/trurl-${V}-linux-x64.tar.gz.sig" "$V"
+          cargo run --locked --quiet -p trurl-core --example verify_update -- "dist/Trurl_${V}_x64-setup.exe" "dist/Trurl_${V}_x64-setup.exe.sig" "$V"
+          cargo run --locked --quiet -p trurl-core --example verify_update -- "dist/trurl-${V}-linux-x64.tar.gz" "dist/trurl-${V}-linux-x64.tar.gz.sig" "$V"
       - name: Manifest, checksums, draft release
         env:
           GH_TOKEN: ${{ github.token }}

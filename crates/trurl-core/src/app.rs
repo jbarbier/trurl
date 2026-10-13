@@ -54,6 +54,8 @@ struct State {
     turns: Vec<Turn>,
     next_turn: u64,
     generating: bool,
+    /// Set while an update installs: no new answer may start.
+    held: bool,
     verified: VerifiedCache,
     /// Bumped on every load request, so a slow old load cannot overwrite a newer one.
     load_epoch: u64,
@@ -127,6 +129,7 @@ impl App {
                     turns: Vec::new(),
                     next_turn: 1,
                     generating: false,
+                    held: false,
                     verified,
                     load_epoch: 0,
                 }),
@@ -496,6 +499,7 @@ impl App {
 
     /// Reload the current model (after a crash, or from the error banner's "Try again").
     pub fn reload(&self) {
+        self.inner.state.lock().unwrap().held = false;
         let file = self.inner.state.lock().unwrap().settings.model.clone();
         if let Some(f) = file {
             self.load(f);
@@ -503,10 +507,20 @@ impl App {
     }
 
     /// Stop the model server but keep the app alive (before installing an
-    /// update). If the install fails, `reload()` brings the model back.
-    pub async fn release_engine(&self) {
-        self.stop_generation();
+    /// update). Refuses while an answer is being written, and from then on no
+    /// new answer can start, in one step: there is no moment between "is it
+    /// busy?" and "stop it" where a learner's answer could be cut off. If the
+    /// install fails, `reload()` brings the model back and lifts the hold.
+    pub async fn release_engine(&self) -> Result<(), UserError> {
+        {
+            let mut st = self.inner.state.lock().unwrap();
+            if st.generating {
+                return Err(UserError::update_wait_for_answer());
+            }
+            st.held = true;
+        }
         self.unload().await;
+        Ok(())
     }
 
     async fn unload(&self) {
@@ -571,6 +585,11 @@ impl App {
         name: &str,
         cancel: &CancellationToken,
     ) -> Result<u32, UserError> {
+        // Only a file that sits in the models folder, by its plain name: a path
+        // (from a front end or an edited settings file) never reaches llama-server.
+        if !crate::paths::is_plain_model_name(file) {
+            return Err(UserError::model_missing(file));
+        }
         let Some(root) = self.inner.llama_root.clone() else {
             return Err(UserError::server_missing());
         };
@@ -607,7 +626,8 @@ impl App {
                 threads: self.inner.hw.threads(),
                 variant,
             };
-            let mut server = Server::spawn(&cfg, &root)?;
+            let log = self.inner.paths.logs().join("llama-server.log");
+            let mut server = Server::spawn_logged(&cfg, &root, Some(&log))?;
             match server.wait_ready(&self.inner.local_http, cancel).await {
                 Ok(()) if cancel.is_cancelled() => {
                     // A newer load replaced this one while it finished: do not publish it.
@@ -717,6 +737,11 @@ impl App {
         if text.trim().is_empty() {
             return Err(UserError::internal("empty message"));
         }
+        // First: during an update the model is gone on purpose, and "no model"
+        // would send the learner looking for one.
+        if self.inner.state.lock().unwrap().held {
+            return Err(UserError::installing_update());
+        }
         let Some(ep) = self.inner.endpoint.lock().unwrap().clone() else {
             let st = self.inner.state.lock().unwrap();
             return Err(match &st.engine {
@@ -728,6 +753,9 @@ impl App {
         let cancel = CancellationToken::new();
         let (turn, messages, temperature) = {
             let mut st = self.inner.state.lock().unwrap();
+            if st.held {
+                return Err(UserError::installing_update());
+            }
             if st.generating {
                 return Err(UserError::busy());
             }

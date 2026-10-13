@@ -53,12 +53,27 @@ const external = [];
 let browser, page;
 
 if (CDP) {
-  browser = await chromium.connectOverCDP(CDP, { timeout: 60000 });
+  // The app opens its WebView2 debug port a few seconds after it starts:
+  // "connection refused" until then is normal, so keep knocking for 90 s.
+  const until = Date.now() + 90000;
+  for (;;) {
+    try {
+      browser = await chromium.connectOverCDP(CDP, { timeout: 10000 });
+      break;
+    } catch (e) {
+      if (Date.now() > until) throw e;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
   const ctx = browser.contexts()[0];
-  page = ctx.pages().find((p) => !p.url().startsWith("devtools")) || ctx.pages()[0];
+  while (!ctx.pages().some((p) => !p.url().startsWith("devtools"))) {
+    if (Date.now() > until) throw new Error("the app window never appeared");
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  page = ctx.pages().find((p) => !p.url().startsWith("devtools"));
 } else {
   browser = await chromium.launch();
-  page = await browser.newPage({ viewport: { width: W, height: H } });
+  page = await browser.newPage({ viewport: { width: W, height: H }, permissions: ["clipboard-read", "clipboard-write"] });
   await page.goto(URL_);
 }
 page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
@@ -137,6 +152,12 @@ if (SUITE === "full") {
       await ask("What is 17 + 25? Reply with the number only.", { waitDone: false });
       await page.locator(".think[data-live]").waitFor({ timeout: 120000 });
       await page.waitForFunction(() => (document.querySelector(".think-body")?.innerText || "").length > 60, null, { timeout: 120000 });
+      // Expanded while generating: the toggle says so and the text is really on screen.
+      if (await page.locator(".think[data-live]").count()) {
+        const live = lastTurn().locator(".think");
+        if ((await live.locator(".think-toggle").getAttribute("aria-expanded")) !== "true") throw new Error("thinking is folded while it streams");
+        if (!(await live.locator(".think-body").isVisible())) throw new Error("thinking text is hidden while it streams");
+      }
       if (!attempt) await shot(page, "thinking");
       await waitPill("Ready", 600000);
       if ((await lastTurn().locator(".md").innerText()).trim()) break;
@@ -147,12 +168,21 @@ if (SUITE === "full") {
     if (!/42/.test(await lastTurn().locator(".md").innerText())) throw new Error("wrong answer");
     await shot(page, "thought");
     await lastTurn().locator(".think-toggle").click();
+    await page.waitForTimeout(400); // let the chevron finish turning
     await shot(page, "thought-open");
   });
 
   await step("/no_think leaves no thinking block", async () => {
     await ask("/no_think Say OK.");
     if (await lastTurn().locator(".think").count()) throw new Error("a thinking block appeared");
+  });
+
+  await step("Copy puts the answer on the clipboard", async () => {
+    const answer = (await lastTurn().locator(".md").innerText()).trim();
+    await lastTurn().getByRole("button", { name: "Copy this answer" }).click();
+    await lastTurn().getByText("Copied").waitFor({ timeout: 5000 });
+    const got = (await page.evaluate(() => navigator.clipboard.readText())).trim();
+    if (!got || !answer.includes(got.replace(/[*_`#]/g, "").trim().slice(0, 10))) throw new Error(`clipboard has ${JSON.stringify(got)}, answer is ${JSON.stringify(answer)}`);
   });
 
   await step("controls: system prompt and temperature 0", async () => {
@@ -244,6 +274,15 @@ if (SUITE === "update") {
   await step(`update card offers version ${expect}`, async () => {
     await page.getByText(`Update available: version ${expect}`).waitFor({ timeout: 120000 });
     await shot(page, "update-offered");
+  });
+  await step("Later hides the offer; Check for updates in About brings it back", async () => {
+    await page.getByRole("button", { name: "Later" }).click();
+    await page.getByText(`Update available: version ${expect}`).waitFor({ state: "detached", timeout: 5000 });
+    await page.click("#openAbout");
+    await page.getByRole("button", { name: "Check for updates" }).click();
+    await page.getByText(`Version ${expect} is available.`).waitFor({ timeout: 60000 });
+    await closeDialogs();
+    await page.getByText(`Update available: version ${expect}`).waitFor({ timeout: 5000 });
   });
   await step("Update now downloads, installs and closes the app", async () => {
     const gone = new Promise((resolve) => browser.on("disconnected", resolve));

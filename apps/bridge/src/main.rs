@@ -29,6 +29,33 @@ struct Ctx {
     tx: broadcast::Sender<String>,
 }
 
+/// Only this page may drive the bridge. Without this, any web site open in the
+/// same browser could send it commands, and DNS rebinding (a hostile name that
+/// resolves to 127.0.0.1) could read the answers too.
+fn same_origin(headers: &axum::http::HeaderMap, port: u16) -> bool {
+    let ok_host = |h: &str| h == format!("127.0.0.1:{port}") || h == format!("localhost:{port}");
+    let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
+    let host_ok = header("host").is_some_and(ok_host);
+    let origin_ok = match header("origin") {
+        None => true,
+        Some(o) => o.strip_prefix("http://").is_some_and(ok_host),
+    };
+    host_ok && origin_ok
+}
+
+async fn same_origin_only(
+    State(port): State<u16>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let ok = same_origin(req.headers(), port);
+    if ok {
+        next.run(req).await
+    } else {
+        (StatusCode::FORBIDDEN, "not from the Trurl page").into_response()
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -49,6 +76,15 @@ async fn main() {
         AppConfig::from_env("bridge"),
         Arc::new(move |e| {
             if let Ok(s) = serde_json::to_string(&e) {
+                // Engine changes on stderr: a test that waits for "Ready" can be
+                // diagnosed from the log alone.
+                if matches!(e, trurl_core::events::Event::Engine { .. }) {
+                    let t = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs_f64())
+                        .unwrap_or(0.0);
+                    eprintln!("{t:.1} {s}");
+                }
                 let _ = tx2.send(s);
             }
         }),
@@ -62,7 +98,8 @@ async fn main() {
         .route("/api/{cmd}", post(command))
         .route("/events", get(events))
         .fallback_service(tower_http::services::ServeDir::new(&ui))
-        .with_state(ctx);
+        .with_state(ctx)
+        .layer(axum::middleware::from_fn_with_state(port, same_origin_only));
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
         .await

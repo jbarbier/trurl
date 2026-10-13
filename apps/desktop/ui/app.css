@@ -354,6 +354,10 @@ input[type="range"]::-moz-range-thumb {
   display: inline-flex; align-items: center; gap: 6px;
 }
 .end-note::before { content: ""; width: 8px; height: 8px; background: var(--ink3); }
+.end { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.end:empty { display: none; }
+.end > .inline-note { flex-basis: 100%; }
+.copy-btn { margin-left: -6px; }
 
 /* Reasoning */
 .think {

@@ -240,6 +240,14 @@ impl UserError {
         )
     }
 
+    pub fn installing_update() -> Self {
+        Self::new(
+            ErrorCode::UpdateBusy,
+            "Trurl is installing an update.",
+            "It starts again in a moment, with your models and settings.",
+        )
+    }
+
     pub fn internal(detail: impl Into<String>) -> Self {
         Self::new(
             ErrorCode::Internal,

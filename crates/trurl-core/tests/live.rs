@@ -50,8 +50,14 @@ fn llama_root() -> PathBuf {
 
 /// A fresh Trurl home with hard links to the requested models (no copy of gigabytes).
 fn harness(models: &[&str], tweak: impl FnOnce(&Path)) -> Harness {
+    harness_in("", models, tweak)
+}
+
+/// A harness whose data folder sits under `sub` (for example a user name with
+/// accents, like `C:\\Users\\Amédée`).
+fn harness_in(sub: &str, models: &[&str], tweak: impl FnOnce(&Path)) -> Harness {
     let home = tempfile::tempdir().unwrap();
-    let paths = Paths::at(home.path());
+    let paths = Paths::at(home.path().join(sub));
     paths.ensure().unwrap();
     for m in models {
         let src = models_src().join(m);
@@ -483,6 +489,60 @@ async fn new_chat_during_an_answer_frees_the_chat() {
     })
     .await;
     assert!(h.app.turns().is_empty());
+    let t = h.ask("Say hello.").await;
+    assert_eq!(t.status, TurnStatus::Done);
+    h.app.shutdown().await;
+}
+
+/// Learners' Windows user names often have accents, and model files get renamed
+/// in their own language. llama-server must still find and load the file.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn a_model_with_accents_in_its_name_and_folder_loads() {
+    let tiny = models_src().join("stories260K-f32.gguf");
+    assert!(tiny.exists(), "scripts/run_evals.sh fetches stories260K-f32.gguf; run it first");
+    let name = "Modèle été ünïcode.gguf";
+    let h = harness_in("Amédée Ngozi", &[], |home| {
+        let models = home.join("Amédée Ngozi").join("models");
+        std::fs::create_dir_all(&models).unwrap();
+        std::fs::copy(&tiny, models.join(name)).unwrap();
+    });
+    h.app.rescan();
+    h.app.select_model(name);
+    h.ready(name).await;
+    let t = h.ask("Once upon a time").await;
+    assert!(!t.answer.is_empty(), "{t:?}");
+    h.app.shutdown().await;
+}
+
+/// The update rule born from the Bionic incident: an update never cuts off an
+/// answer. Releasing the engine is refused while one is being written; once
+/// released, no new answer can start until the update fails and the model
+/// comes back.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn an_update_never_cuts_off_an_answer() {
+    let h = harness(&[GEMMA], |_| {});
+    h.ready(GEMMA).await;
+    let id = h.app.send("Write a long story about a lion.").unwrap();
+    h.wait("answer started", 120, |app, _| {
+        app.turns()
+            .into_iter()
+            .find(|t| t.id == id && !t.answer.is_empty())
+    })
+    .await;
+    let refused = h.app.release_engine().await.unwrap_err();
+    assert_eq!(refused.code, trurl_core::ErrorCode::UpdateBusy);
+    assert!(h.app.is_generating(), "the answer goes on");
+    h.app.stop_generation();
+    h.wait("generating false", 30, |app, _| (!app.is_generating()).then_some(()))
+        .await;
+    h.app.release_engine().await.unwrap();
+    let held = h.app.send("Hello?").unwrap_err();
+    assert_eq!(held.title, "Trurl is installing an update.");
+    // The install failed: the model comes back and chatting works again.
+    h.app.reload();
+    h.ready(GEMMA).await;
     let t = h.ask("Say hello.").await;
     assert_eq!(t.status, TurnStatus::Done);
     h.app.shutdown().await;

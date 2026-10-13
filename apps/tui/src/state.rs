@@ -32,6 +32,11 @@ pub enum Confirm {
         file: String,
         name: String,
     },
+    /// "Update available": the version and its full release notes.
+    Update {
+        version: String,
+        notes: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -121,6 +126,9 @@ pub struct Ui {
     pub update_msg: Option<String>,
     pub token: Editor,
     pub quit: bool,
+    /// The learner pressed Enter while the model was loading: the message goes
+    /// out as soon as it is ready (it stays in the box if loading fails).
+    pub queued: bool,
     /// Turn ids whose thinking block the learner toggled away from the default.
     pub toggled: HashSet<u64>,
 }
@@ -172,6 +180,7 @@ impl Ui {
             update_msg: None,
             token: Editor::default(),
             quit: false,
+            queued: false,
             toggled: HashSet::new(),
         }
     }
@@ -256,6 +265,23 @@ impl Ui {
                 self.dl_sel = self.dl_sel.min(self.downloads.len().saturating_sub(1));
             }
             Event::Notice { error } => self.notice = Some(error),
+        }
+    }
+
+    /// Ctrl+T: open every thinking block in the chat, or close them all if
+    /// they are all open already.
+    pub fn toggle_all_thinking(&mut self) {
+        let with: Vec<Turn> = self
+            .turns
+            .iter()
+            .filter(|t| !t.reasoning.is_empty())
+            .cloned()
+            .collect();
+        let open = !with.iter().all(|t| self.thinking_open(t));
+        for t in &with {
+            if self.thinking_open(t) != open && !self.toggled.remove(&t.id) {
+                self.toggled.insert(t.id);
+            }
         }
     }
 

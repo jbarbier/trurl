@@ -7,6 +7,15 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 /// Wrap styled spans to `width` columns, prefixing every line with `prefix`.
+/// Text from the network (release notes, model cards) without control
+/// characters: an escape sequence must never reach the terminal.
+pub fn clean(s: &str) -> String {
+    s.chars()
+        .map(|c| if c == '\t' { ' ' } else { c })
+        .filter(|c| !c.is_control())
+        .collect()
+}
+
 pub fn wrap(spans: Vec<Span<'static>>, width: usize, prefix: Span<'static>) -> Vec<Line<'static>> {
     let avail = width.saturating_sub(prefix.content.width()).max(8);
     let mut lines: Vec<Line<'static>> = Vec::new();

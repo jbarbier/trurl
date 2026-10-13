@@ -14,6 +14,12 @@ use std::path::Path;
 const MAGIC: &[u8; 4] = b"GGUF";
 const MAX_STRING: u64 = 16 * 1024 * 1024; // chat templates are a few KB; 16 MB is generous
 const MAX_KV: u64 = 100_000;
+/// Keys are names like `general.architecture`: a few dozen bytes.
+const MAX_KEY: u64 = 64 * 1024;
+/// Strings Trurl keeps (`general.*`, the chat template), all together. A file
+/// that asks for more is not a model worth trusting with the learner's memory:
+/// the rest is skipped, not read.
+const MAX_KEPT_TOTAL: u64 = 4 * 1024 * 1024;
 const MAX_TENSORS: u64 = 1_000_000;
 const MAX_DIMS: u32 = 8;
 
@@ -81,6 +87,8 @@ enum Value {
 
 struct Reader<T: Read + Seek> {
     r: T,
+    /// Bytes of strings kept so far (see MAX_KEPT_TOTAL).
+    kept: u64,
 }
 
 impl<T: Read + Seek> Reader<T> {
@@ -114,10 +122,10 @@ impl<T: Read + Seek> Reader<T> {
         self.r.seek(SeekFrom::Current(n))?;
         Ok(())
     }
-    fn string(&mut self) -> R<String> {
+    fn key(&mut self) -> R<String> {
         let n = self.u64()?;
-        if n > MAX_STRING {
-            return Err(GgufError::Malformed(format!("string of {n} bytes")));
+        if n > MAX_KEY {
+            return Err(GgufError::Malformed(format!("key of {n} bytes")));
         }
         let mut b = vec![0u8; n as usize];
         self.r.read_exact(&mut b)?;
@@ -149,10 +157,17 @@ impl<T: Read + Seek> Reader<T> {
             6 => Value::F(f32::from_bits(self.u32()?) as f64),
             7 => Value::U((self.u8()? != 0) as u64),
             8 => {
-                if keep_string {
-                    Value::Str(self.string()?)
+                let n = self.u64()?;
+                if n > MAX_STRING {
+                    return Err(GgufError::Malformed(format!("string of {n} bytes")));
+                }
+                if keep_string && self.kept + n <= MAX_KEPT_TOTAL {
+                    self.kept += n;
+                    let mut b = vec![0u8; n as usize];
+                    self.r.read_exact(&mut b)?;
+                    Value::Str(String::from_utf8_lossy(&b).into_owned())
                 } else {
-                    self.skip_string()?;
+                    self.skip(n)?;
                     Value::Other
                 }
             }
@@ -204,7 +219,7 @@ pub fn read(path: &Path) -> R<GgufInfo> {
 }
 
 pub fn read_from<T: Read + Seek>(r: T) -> R<GgufInfo> {
-    let mut rd = Reader { r };
+    let mut rd = Reader { r, kept: 0 };
     let mut magic = [0u8; 4];
     match rd.r.read_exact(&mut magic) {
         Ok(()) => {}
@@ -231,7 +246,7 @@ pub fn read_from<T: Read + Seek>(r: T) -> R<GgufInfo> {
     let mut kv: Vec<(String, Value)> = Vec::new();
     let mut alignment: u64 = 32;
     for _ in 0..n_kv {
-        let key = rd.string()?;
+        let key = rd.key()?;
         let ty = rd.u32()?;
         let keep = key.starts_with("general.") || key == "tokenizer.chat_template";
         let v = rd.value(ty, keep)?;

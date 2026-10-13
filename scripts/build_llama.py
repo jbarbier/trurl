@@ -97,7 +97,9 @@ def fetch_source(cache: Path) -> Path:
     out = cache / f"llama.cpp-{PINS['llama_cpp']['commit']}"
     if not out.exists():
         with tarfile.open(tgz) as t:
-            t.extractall(cache, filter="data")
+            # The checksum is already verified; the "data" filter is extra safety on
+            # Pythons that have it (the Debian 11 release builder may not).
+            t.extractall(cache, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
     if not (out / "CMakeLists.txt").exists():
         sys.exit(f"unexpected tarball layout: {out}")
     return out

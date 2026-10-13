@@ -139,9 +139,9 @@ fn banner_lines(ui: &Ui, width: usize) -> Vec<Line<'static>> {
     match &ui.update {
         UpdateState::Available(u) => {
             let hint = if ui.generating {
-                "F7 to update when the answer is finished, F8 for later"
+                "F7 to see what is new and update when the answer is finished, F8 for later"
             } else {
-                "F7 to update now, F8 for later"
+                "F7 to see what is new and update, F8 for later"
             };
             out.push(Line::from(vec![
                 Span::styled(
@@ -315,7 +315,12 @@ fn draw_chat(f: &mut Frame, ui: &Ui, area: Rect) {
         "Message (Esc stops the answer)".to_string()
     } else if !ready {
         match &ui.engine {
-            EngineState::Loading { .. } => "Message (you can type while the model loads)".into(),
+            EngineState::Loading { .. } if ui.queued => {
+                "Message (sent as soon as the model is ready)".into()
+            }
+            EngineState::Loading { .. } => {
+                "Message (type now: Enter sends it when the model is ready)".into()
+            }
             EngineState::Failed { .. } => {
                 "Message (the model did not load: F2 to pick another)".into()
             }
@@ -476,11 +481,19 @@ pub fn chat_lines(ui: &Ui, width: usize) -> Vec<Line<'static>> {
                 format!("Thought for {}", human_duration(ms))
             } else if t.status == TurnStatus::Stopped && t.answer.is_empty() {
                 "Stopped while thinking".to_string()
+            } else if t.status == TurnStatus::Cut && t.answer.is_empty() {
+                "Ran out of room while thinking".to_string()
+            } else if t.status == TurnStatus::Error && t.answer.is_empty() {
+                "Thinking (cut short)".to_string()
             } else {
                 "Thinking".to_string()
             };
             let arrow = if open { "▾" } else { "▸" };
-            let hint = if open { "" } else { "  (Ctrl+T to show)" };
+            let hint = if open {
+                ""
+            } else {
+                "  (Ctrl+T shows thinking)"
+            };
             out.push(Line::from(vec![
                 Span::styled(
                     format!("  {arrow} {label}"),
@@ -1085,6 +1098,9 @@ fn draw_confirm(f: &mut Frame, c: &Confirm, area: Rect) {
             ),
             "Enter: load anyway",
         ),
+        Confirm::Update { version, notes } => {
+            return draw_update(f, version, notes, area);
+        }
     };
     let r = centered(area, 64, 8);
     f.render_widget(Clear, r);
@@ -1103,6 +1119,34 @@ fn draw_confirm(f: &mut Frame, c: &Confirm, area: Rect) {
         Paragraph::new(l)
             .wrap(Wrap { trim: false })
             .block(block(title).border_style(Style::default().fg(Color::Yellow))),
+        r,
+    );
+}
+
+fn draw_update(f: &mut Frame, version: &str, notes: &str, area: Rect) {
+    let r = centered(area, 72, area.height.saturating_sub(4).clamp(8, 20));
+    f.render_widget(Clear, r);
+    let mut l: Vec<Line> = notes
+        .lines()
+        .map(|s| Line::from(crate::text::clean(s)))
+        .collect();
+    l.push(Line::from(""));
+    l.push(Line::from(
+        "Your models and settings are kept. Trurl starts again by itself.",
+    ));
+    l.push(Line::from(""));
+    l.push(Line::from(vec![
+        Span::styled(
+            "Enter: update now",
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("    F8: later    Esc: close"),
+    ]));
+    f.render_widget(
+        Paragraph::new(l).wrap(Wrap { trim: false }).block(
+            block(&format!("Update available: version {version}"))
+                .border_style(Style::default().fg(ACCENT)),
+        ),
         r,
     );
 }

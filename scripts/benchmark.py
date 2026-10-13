@@ -24,6 +24,7 @@ Linux only (reads /proc; caps memory with systemd-run cgroups).
 from __future__ import annotations
 
 import argparse
+import re
 import json
 import os
 import shutil
@@ -205,6 +206,9 @@ class Trurl(App):
     def stream(self, prompt):
         self.call("new_chat")
         r = urllib.request.urlopen(f"http://127.0.0.1:{self.port}/events", timeout=600)
+        # The clock starts here, at the press of Send, as for the other apps: the
+        # test's own "new chat" and event connection are not the learner's wait.
+        self.t_send = time.time()
         self.call("send", {"text": prompt})
         for raw in r:
             line = raw.decode().strip()
@@ -252,7 +256,8 @@ class Llamafile(OpenAIServer):
 
     def start(self, model, threads, cap):
         self.port = free_port()
-        cmd = [str(self.exe), "--server", "--nobrowser", "-m", str(model), "-c", "2048", "-t", str(threads), "--host", "127.0.0.1", "--port", str(self.port)]
+        # llamafile is an "actually portable executable": the shell starts it on any Linux
+        cmd = ["sh", str(self.exe), "--server", "--gpu", "disable", "-m", str(model), "-c", "2048", "-t", str(threads), "--host", "127.0.0.1", "--port", str(self.port)]
         self.proc = subprocess.Popen(self.wrap(cmd, cap), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def configure(self):
@@ -317,7 +322,13 @@ class Ollama(App):
 
 # ----- measuring -----------------------------------------------------------------
 
-def measure(app: App, model: Path, threads: int, disk: int, runs: int) -> dict:
+def quartiles(xs: list[float]) -> list[float]:
+    q = statistics.quantiles(xs, n=4, method="inclusive")
+    return [q[0], q[2]]
+
+
+def session(app: App, model: Path, threads: int, idle: bool) -> dict:
+    """One start-to-stop session: load, warm up, answer every prompt once."""
     t0 = time.time()
     app.start(model, threads, None)
     while not app.ready():
@@ -325,66 +336,113 @@ def measure(app: App, model: Path, threads: int, disk: int, runs: int) -> dict:
             raise RuntimeError(f"{app.name} exited during load")
         if time.time() - t0 > 600:
             raise RuntimeError(f"{app.name} did not load in 10 minutes")
-        time.sleep(0.1)
+        time.sleep(0.05)
+    load = time.time() - t0
     app.configure()
     # Warm-up answer (excluded), then the measured ones.
     for _ in app.stream("Say OK."):
         pass
-    load = None
-    first_words, speeds, peaks = [], [], []
-    for i in range(runs):
-        for prompt in PROMPTS:
-            sampler = PeakSampler(app.proc.pid)
-            t_send = time.time()
-            n, t_first, t_last = 0, None, None
-            for _ in app.stream(prompt):
-                now = time.time()
-                if t_first is None:
-                    t_first = now
-                t_last = now
-                n += 1
-                if n >= MAX_TOKENS:
-                    break
-            peaks.append(sampler.done())
+    out: dict = {"load": load, "first_words": [], "speeds": [], "peaks": []}
+    for prompt in PROMPTS:
+        sampler = PeakSampler(app.proc.pid)
+        t_send = time.time()
+        n, t_first, t_last = 0, None, None
+        app.t_send = None
+        for _ in app.stream(prompt):
+            now = time.time()
             if t_first is None:
-                continue
-            first_words.append(t_first - t_send)
-            if n > 1:
-                speeds.append((n - 1) / (t_last - t_first))
-    # Idle: model loaded, nothing asked.
-    time.sleep(2)
-    pids = tree(app.proc.pid)
-    idle_ram = rss(pids)
-    c0 = cpu_ticks(pids)
-    time.sleep(20)
-    idle_cpu = (cpu_ticks(tree(app.proc.pid)) - c0) / TICK / 20 * 100
+                t_first = now
+            t_last = now
+            n += 1
+            if n >= MAX_TOKENS:
+                break
+        out["peaks"].append(sampler.done())
+        if t_first is None:
+            continue
+        out["first_words"].append(t_first - (app.t_send or t_send))
+        if n > 1:
+            out["speeds"].append((n - 1) / (t_last - t_first))
+    if idle:
+        # Idle: model loaded, nothing asked.
+        time.sleep(2)
+        pids = tree(app.proc.pid)
+        out["idle_ram"] = rss(pids)
+        c0 = cpu_ticks(pids)
+        time.sleep(20)
+        out["idle_cpu"] = (cpu_ticks(tree(app.proc.pid)) - c0) / TICK / 20 * 100
     app.stop()
-    # Load time measured separately, from a cold start of the app (page cache warm).
-    t0 = time.time()
-    app.start(model, threads, None)
-    while not app.ready():
-        time.sleep(0.05)
-    load = time.time() - t0
-    app.stop()
-    return {
-        "app": app.name,
-        "disk_mb": round(disk / 1e6),
-        "load_s": round(load, 1),
-        "first_word_s": round(statistics.median(first_words), 2),
-        "tokens_per_s": round(statistics.median(speeds), 1),
-        "ram_idle_mb": round(idle_ram / 1e6),
-        "ram_peak_mb": round(max(peaks) / 1e6),
-        "cpu_idle_pct": round(idle_cpu, 2),
-    }
+    return out
+
+
+def measure(apps: list[tuple[App, int]], model: Path, threads: int, rounds: int, log) -> list[dict]:
+    """Apps take turns, round by round (A B C, A B C, ...), so a noisy minute on the
+    machine hits every app instead of the one that happened to be running."""
+    acc = {app.name: {"loads": [], "first_words": [], "speeds": [], "peaks": []} for app, _ in apps}
+    for r in range(rounds):
+        for app, _ in apps:
+            s = session(app, model, threads, idle=(r == 0))
+            a = acc[app.name]
+            a["loads"].append(s["load"])
+            for k in ("first_words", "speeds", "peaks"):
+                a[k].extend(s[k])
+            if r == 0:
+                a["idle_ram"], a["idle_cpu"] = s["idle_ram"], s["idle_cpu"]
+            log(f"round {r + 1}/{rounds} {app.name}: {statistics.median(s['speeds']):.1f} tokens/s, load {s['load']:.1f}s")
+    results = []
+    for app, disk in apps:
+        a = acc[app.name]
+        results.append({
+            "app": app.name,
+            "disk_mb": round(disk / 1e6),
+            "load_s": round(statistics.median(a["loads"]), 1),
+            "first_word_s": round(statistics.median(a["first_words"]), 2),
+            "tokens_per_s": round(statistics.median(a["speeds"]), 1),
+            # The middle half of the answers: one slow minute on the machine does not
+            # make an app look faster or slower than it is.
+            "tokens_per_s_range": [round(q, 1) for q in quartiles(a["speeds"])],
+            "tokens_per_s_all": [round(x, 2) for x in a["speeds"]],
+            "ram_idle_mb": round(a["idle_ram"] / 1e6),
+            "ram_peak_mb": round(max(a["peaks"]) / 1e6),
+            "cpu_idle_pct": round(a["idle_cpu"], 2),
+        })
+    return results
+
+
+def evict(path: Path) -> None:
+    """Drop a file's pages from the page cache (no root needed for clean pages).
+
+    Without this, a memory cap means little: pages already cached by an earlier
+    run belong to another cgroup and are not charged to the capped app."""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
+def evict_app_files(app: "App", model: Path) -> None:
+    evict(model)
+    # Ollama stores its own copy of the model as a blob.
+    home = getattr(app, "home", None)
+    if home:
+        for f in Path(home).rglob("*"):
+            if f.is_file() and f.stat().st_size > 50_000_000:
+                evict(f)
 
 
 def low_ram(app: App, model: Path, threads: int, cap: str) -> str:
     try:
         t0 = time.time()
+        evict(model)
         app.start(model, threads, cap)
+        evict_app_files(app, model)  # Ollama copied the model while starting: evict that copy too
         while not app.ready():
             if app.proc.poll() is not None:
-                return "fails to load"
+                return "does not start"
             if time.time() - t0 > 300:
                 return "too slow to load (>5 min)"
             time.sleep(0.2)
@@ -395,7 +453,7 @@ def low_ram(app: App, model: Path, threads: int, cap: str) -> str:
             n += 1
             if time.time() - t1 > 180:
                 return "too slow (>3 min)"
-        return f"answers ({n} tokens in {time.time() - t1:.0f}s)" if n else "no answer"
+        return f"answers in {max(1, round(time.time() - t1))} s" if n else "no answer"
     except Exception as e:
         return f"fails ({type(e).__name__})"
     finally:
@@ -425,25 +483,46 @@ def render(data: dict) -> tuple[str, str]:
         ("cpu_idle_pct", "CPU, idle", "{}%"),
     ]
 
+    # Speed is noisy on a shared machine: every app whose range reaches the best
+    # median is a tie, and all of them are bold.
+    top = max(rows, key=lambda r: r["tokens_per_s"])
+
+    def tied(r):
+        lo, hi = r.get("tokens_per_s_range", [r["tokens_per_s"]] * 2)
+        tlo, thi = top.get("tokens_per_s_range", [top["tokens_per_s"]] * 2)
+        return hi >= tlo and lo <= thi
+
     def cell(r, k, f):
         v = f.format(r[k])
+        if k == "tokens_per_s" and "tokens_per_s_range" in r:
+            lo, hi = r["tokens_per_s_range"]
+            v = f"{r[k]} ({lo} to {hi})"
+            return f"**{v}**" if tied(r) else v
         return f"**{v}**" if r[k] == best[k] else v
 
     head = "| | " + " | ".join(c[1] for c in cols) + " |\n|---|" + "---|" * len(cols) + "\n"
     table = head + "".join("| " + r["app"] + " | " + " | ".join(cell(r, k, f) for k, _, f in cols) + " |\n" for r in rows)
     caps = list(next(iter(data["low_ram"].values())).keys())
     low = "| Memory left for the app | " + " | ".join(caps) + " |\n|---|" + "---|" * len(caps) + "\n"
-    low += "".join("| " + app + " | " + " | ".join(v[c] for c in caps) + " |\n" for app, v in data["low_ram"].items())
+    def plain(v: str) -> str:
+        # Older result files said it differently.
+        m = re.match(r"answers \(\d+ tokens in (\d+)s\)", v)
+        return f"answers in {max(1, int(m.group(1)))} s" if m else v.replace("fails to load", "does not start")
+
+    low += "".join("| " + app + " | " + " | ".join(plain(v[c]) for c in caps) + " |\n" for app, v in data["low_ram"].items())
     setup = (f"{m['cpu']}, {m['threads']} threads, {m['ram_gb']} GB RAM, no GPU. Model: `{data['model']}` for every app, "
-             f"context 2,048, temperature 0, {data['max_tokens']}-token answers, median of {len(PROMPTS)} prompts x runs. "
+             f"context 2,048, temperature 0, answers of up to {data['max_tokens']} tokens, median of {len(PROMPTS)} prompts "
+             f"x {data.get('rounds', 2)} rounds (the apps take turns each round). Speed in brackets: the middle half of the answers. "
              f"Measured {data['date']} by `scripts/benchmark.py`.")
     readme = table + "\n" + setup + "\n"
     full = (
         "# Benchmarks\n\nGenerated by `scripts/benchmark.py` from `docs/benchmarks.json`. Do not edit by hand: rerun the script.\n\n"
         "## Setup\n\n" + setup + "\n\n"
-        "## Results\n\nBold is the best in each column.\n\n" + table + "\n"
+        "## Results\n\nBold is the best in each column. For speed, every app whose middle half overlaps the fastest one's is bold: "
+        "the difference is within the noise of the machine.\n\n" + table + "\n"
         "- **App on disk:** the program without the model. For Trurl: the terminal app plus its three llama-server builds.\n"
-        "- **Load time:** from starting the app to the first possible answer, model already in the disk cache.\n"
+        "- **Load time:** from starting the app to the first possible answer, model already in the disk cache. Median of the rounds.\n"
+        "- **Speed:** the three apps run the same engine family (llama.cpp), so speed mostly depends on the llama.cpp version and how it was compiled.\n"
         "- **RAM:** proportional set size (PSS) of every process of the app, so shared pages count once. The model's 806 MB of weights are memory-mapped and counted here.\n"
         "- **CPU, idle:** with the model loaded and nothing asked, over 20 seconds. Anything above 0% drains a laptop battery for nothing.\n\n"
         "## When memory is short\n\nEach app started inside a memory limit (cgroup, no swap), then asked to answer one short question.\n\n" + low + "\n"
@@ -483,8 +562,9 @@ def main() -> None:
     ap.add_argument("--ollama")
     ap.add_argument("--llamafile")
     ap.add_argument("--threads", type=int, default=os.cpu_count() or 2)
-    ap.add_argument("--runs", type=int, default=2)
+    ap.add_argument("--runs", type=int, default=5, help="rounds; each app answers every prompt once per round")
     ap.add_argument("--caps", default="1.5G,1G,750M,500M")
+    ap.add_argument("--only-low-ram", action="store_true", help="re-run only the memory-cap test, merging into --json")
     ap.add_argument("--json", default=str(ROOT / "target/bench.json"))
     a = ap.parse_args()
     if a.render:
@@ -499,12 +579,15 @@ def main() -> None:
     if a.llamafile:
         apps.append((Llamafile(Path(a.llamafile)), dir_size(Path(a.llamafile))))
 
-    results, lowram = [], {}
-    for app, disk in apps:
-        print(f"== {app.name}", flush=True)
-        r = measure(app, model, a.threads, disk, a.runs)
-        print(json.dumps(r), flush=True)
-        results.append(r)
+    lowram: dict = {}
+    if a.only_low_ram:
+        results = json.loads(Path(a.json).read_text())["results"]
+    else:
+        results = measure(apps, model, a.threads, a.runs, lambda m: print(m, flush=True))
+        for r in results:
+            print(json.dumps(r), flush=True)
+    for app, _ in apps:
+        print(f"== {app.name} with less memory", flush=True)
         lowram[app.name] = {}
         for cap in a.caps.split(","):
             lowram[app.name][cap] = low_ram(app, model, a.threads, cap)
@@ -515,6 +598,7 @@ def main() -> None:
         "machine": {"cpu": cpu_name(), "threads": a.threads, "ram_gb": round(int(meminfo) / 1024 / 1024, 1)},
         "model": model.name,
         "max_tokens": MAX_TOKENS,
+        "rounds": a.runs,
         "results": results,
         "low_ram": lowram,
         "date": time.strftime("%Y-%m-%d"),

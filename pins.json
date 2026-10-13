@@ -89,7 +89,14 @@
     "cmake": "3.31.6",
     "cmake_linux_x86_64_sha256": "5a1133ff103c71eb5120e2cc3de922733e7d8a26a98ae716397e8676adb367bf",
     "tauri_cli": "2.12.2",
-    "ninja": "1.12.1"
+    "ninja": "1.12.1",
+    "sde": {
+      "version": "10.13.1",
+      "linux_url": "https://downloadmirror.intel.com/924984/sde-external-10.13.1-2026-07-28-lin.tar.xz",
+      "linux_sha256": "94e97d623fec54385686e1e7ba65ebc9941748c05ee451423948334892bf2b50",
+      "windows_url": "https://downloadmirror.intel.com/924984/sde-external-10.13.1-2026-07-28-win.tar.xz",
+      "windows_sha256": "74e626ede09b0baa5011fc9e51b58627ea92c3fc0bae5fd7db34b490f335f651"
+    }
   },
   "test_models": [
     {

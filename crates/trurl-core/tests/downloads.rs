@@ -29,6 +29,9 @@ enum Mode {
     NeedToken,
     /// Serve bytes that do not match the hash.
     Corrupt,
+    /// A school web filter: the first request drops at 700 000 bytes, the next
+    /// N requests get a small HTML page with status 200, then the real file.
+    FilterPage(usize),
 }
 
 struct Srv {
@@ -52,6 +55,16 @@ async fn serve(State(s): State<Arc<Srv>>, headers: HeaderMap) -> Response {
             != Some("Bearer hf_secret")
     {
         return Response::builder().status(401).body(Body::empty()).unwrap();
+    }
+    if let Mode::FilterPage(pages) = s.mode
+        && n >= 1
+        && n <= pages
+    {
+        return Response::builder()
+            .status(200)
+            .header(header::CONTENT_TYPE, "text/html")
+            .body(Body::from("<html><body>This site is blocked by your school.</body></html>"))
+            .unwrap();
     }
     let total = s.data.len();
     let mut start = range
@@ -91,7 +104,7 @@ async fn serve(State(s): State<Arc<Srv>>, headers: HeaderMap) -> Response {
     }
     let drop_rule = match s.mode {
         Mode::DropAfter(cut, times) => Some((cut, times)),
-        Mode::WrongRange => Some((700_000, 1)),
+        Mode::WrongRange | Mode::FilterPage(_) => Some((700_000, 1)),
         _ => None,
     };
     if let Some((cut, times)) = drop_rule
@@ -469,4 +482,126 @@ async fn cancel_during_the_check_installs_nothing() {
         "cancelled download was installed"
     );
     assert!(s.done.lock().unwrap().is_empty());
+}
+
+/// A web filter answering a resume with its own page (status 200) must not cost
+/// the learner the part already downloaded: the page is refused, the part kept,
+/// and the download resumes from where it was once the real file comes back.
+#[tokio::test]
+async fn a_filter_page_never_erases_the_part_already_downloaded() {
+    let s = setup(Mode::FilterPage(3)).await;
+    let id = s.downloads.start(s.req.clone()).unwrap();
+    let name = wait_done(&s).await.unwrap();
+    assert_installed(&s, &name);
+    let ranges = s.srv.ranges.lock().unwrap().clone();
+    assert!(ranges.len() >= 5, "drop, 3 filter pages, resume: {ranges:?}");
+    assert!(
+        ranges[1..].iter().all(|r| r.as_deref() == Some("bytes=700000-")),
+        "every retry resumed from the kept bytes: {ranges:?} ({id})"
+    );
+}
+
+/// A dropped connection is retried for as long as Trurl is open, not five
+/// times: an outage of a few minutes needs no click.
+#[tokio::test]
+async fn retries_never_give_up_on_a_dropping_connection() {
+    let s = setup(Mode::DropAfter(10_000, 1_000)).await;
+    s.downloads.start(s.req.clone()).unwrap();
+    // 5 retry delays of 50 ms: well past them.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let l = s.downloads.list();
+    assert_eq!(l.len(), 1);
+    assert_ne!(l[0].status, DownloadStatus::Failed, "{:?}", l[0].error);
+    assert!(s.srv.requests.load(Ordering::SeqCst) > 8);
+}
+
+/// After a power cut, the end of the part file may hold bytes that never reached
+/// the disk. Only the synced bytes are trusted; the rest comes again.
+#[tokio::test]
+async fn after_a_power_cut_only_synced_bytes_are_kept() {
+    let s = setup(Mode::DropAfter(800_000, 1)).await;
+    let id = s.downloads.start(s.req.clone()).unwrap();
+    for _ in 0..300 {
+        if part_len(&s, &id) >= 800_000 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    s.downloads.pause_all();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let synced = part_len(&s, &id);
+    // The power cut: garbage after the last sync, and the job still says `synced`.
+    let part = s.dl_dir.path().join(format!("{id}.part"));
+    let mut f = std::fs::OpenOptions::new().append(true).open(&part).unwrap();
+    std::io::Write::write_all(&mut f, &[0u8; 300_000]).unwrap();
+    drop(f);
+    let done: Arc<Mutex<Vec<String>>> = Arc::default();
+    let d2 = done.clone();
+    let again = Downloads::new(
+        s.dl_dir.path().into(),
+        s.models.path().into(),
+        s.base.clone(),
+        trurl_core::net::client_builder().build().unwrap(),
+        Arc::new(|_| {}),
+        Arc::new(move |f| d2.lock().unwrap().push(f)),
+    );
+    assert_eq!(part_len(&s, &id), synced, "cut back to the synced bytes");
+    assert_eq!(again.list()[0].done, synced);
+    again.resume_interrupted();
+    for _ in 0..300 {
+        if !done.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let name = done.lock().unwrap().first().cloned().expect("finished");
+    assert_eq!(std::fs::read(s.models.path().join(name)).unwrap(), s.srv.data);
+}
+
+/// A part file whose job is gone (or was never written) can never resume: it is
+/// deleted at the next start instead of filling the disk forever, unseen.
+#[tokio::test]
+async fn a_part_file_without_its_job_is_cleaned_up() {
+    let s = setup(Mode::Good).await;
+    let orphan = s.dl_dir.path().join("0123456789abcdef.part");
+    std::fs::write(&orphan, vec![1u8; 4096]).unwrap();
+    std::fs::write(s.dl_dir.path().join("broken.json"), b"{ not json").unwrap();
+    let _again = Downloads::new(
+        s.dl_dir.path().into(),
+        s.models.path().into(),
+        s.base.clone(),
+        trurl_core::net::client_builder().build().unwrap(),
+        Arc::new(|_| {}),
+        Arc::new(|_| {}),
+    );
+    assert!(!orphan.exists());
+}
+
+/// The job file is data on disk: an edited one cannot point the install outside
+/// the models folder or rename the download.
+#[tokio::test]
+async fn an_edited_job_file_cannot_escape_the_models_folder() {
+    let s = setup(Mode::DropAfter(500_000, 1)).await;
+    let id = s.downloads.start(s.req.clone()).unwrap();
+    for _ in 0..300 {
+        if part_len(&s, &id) >= 500_000 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    s.downloads.pause_all();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let job = s.dl_dir.path().join(format!("{id}.json"));
+    let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&job).unwrap()).unwrap();
+    v["dest_file"] = "../../evil.gguf".into();
+    std::fs::write(&job, serde_json::to_vec(&v).unwrap()).unwrap();
+    let again = Downloads::new(
+        s.dl_dir.path().into(),
+        s.models.path().into(),
+        s.base.clone(),
+        trurl_core::net::client_builder().build().unwrap(),
+        Arc::new(|_| {}),
+        Arc::new(|_| {}),
+    );
+    assert_eq!(again.list()[0].dest_file, "tiny-Q4_K_M.gguf");
 }

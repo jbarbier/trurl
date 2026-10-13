@@ -57,10 +57,23 @@ impl Settings {
             std::fs::create_dir_all(dir)?;
         }
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(
-            &tmp,
-            serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?,
-        )?;
+        let bytes = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
+        // The file may hold a Hugging Face token: only this account may read it.
+        #[cfg(unix)]
+        {
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            let _ = std::fs::remove_file(&tmp);
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&tmp)?;
+            f.write_all(&bytes)?;
+            f.sync_all()?;
+        }
+        #[cfg(not(unix))]
+        std::fs::write(&tmp, &bytes)?;
         std::fs::rename(&tmp, path)
     }
 
@@ -91,6 +104,18 @@ pub fn clamp_context(c: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_settings_file_is_private_on_linux() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        Settings::default().save(&path).unwrap();
+        Settings::default().save(&path).unwrap(); // a second save replaces it, still private
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
 
     #[test]
     fn defaults_match_the_spec() {

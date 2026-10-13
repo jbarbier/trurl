@@ -29,8 +29,9 @@ a desktop app (Windows, Tauri) and a terminal app (Linux).
    extra system prompt, no tools, no environment block. The chat template comes from
    the GGUF file (llama-server `--jinja`). Previous turns' reasoning is never sent back.
 4. **Models live outside the install directory** (`%LOCALAPPDATA%\CyberiadLabs\Trurl\models`
-   on Windows, `~/.local/share/trurl/models` on Linux). No installer, updater or
-   uninstaller ever deletes that folder.
+   on Windows, `~/.local/share/trurl/models` on Linux). No installer or updater ever
+   deletes that folder. The uninstaller deletes it only when the learner ticks
+   "Delete the application data" (an explicit choice, to free a small disk).
 5. **Plain-language errors.** Every failure a learner can hit maps to a `UserError`
    with a title and a "what to do" line (`crates/trurl-core/src/errors.rs`). A raw
    stack trace or HTTP code on screen is a bug.
@@ -63,6 +64,7 @@ python3 scripts/check_pins.py              # versions agree, vendored hashes, RE
 python3 scripts/check_copy.py              # UI copy voice rules
 python3 scripts/check_network.py           # no URL outside the allowlist
 python3 scripts/check_cpu_isa.py vendor/llama/linux     # each build uses only its CPU tier
+python3 scripts/check_cpu_emulated.py --model <models>/stories260K-f32.gguf  # each build runs on its oldest CPU
 python3 scripts/check_pe_imports.py vendor/llama/linux  # no library a learner may lack
 bash scripts/run_evals.sh                  # evals: real llama-server + real models, network blocked
 bash apps/bridge/e2e/run.sh                # UI flows in Chromium at 1366x768, real core

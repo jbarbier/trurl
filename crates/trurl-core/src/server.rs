@@ -129,10 +129,41 @@ pub fn exit_error(kind: &ExitKind, model_name: &str, log_tail: &str) -> UserErro
 }
 
 #[derive(Clone, Default)]
-pub struct LogRing(Arc<Mutex<VecDeque<String>>>);
+pub struct LogRing(Arc<Mutex<VecDeque<String>>>, Option<Arc<Mutex<LogFile>>>);
+
+/// The server's output on disk, for a teacher to read or send when a model
+/// fails: `logs/llama-server.log` for this run, `.previous.log` for the one before.
+pub struct LogFile {
+    file: std::fs::File,
+    written: u64,
+}
+
+/// A chatty server must not fill a small disk: past this, lines are dropped.
+const LOG_FILE_MAX: u64 = 10 * 1024 * 1024;
+
+impl LogFile {
+    pub fn create(path: &Path) -> Option<Self> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).ok()?;
+        }
+        if path.exists() {
+            let _ = std::fs::rename(path, path.with_extension("previous.log"));
+        }
+        let file = std::fs::File::create(path).ok()?;
+        Some(LogFile { file, written: 0 })
+    }
+}
 
 impl LogRing {
     fn push(&self, line: String) {
+        if let Some(f) = &self.1 {
+            use std::io::Write;
+            let mut f = f.lock().unwrap();
+            if f.written < LOG_FILE_MAX {
+                f.written += line.len() as u64 + 1;
+                let _ = writeln!(f.file, "{line}");
+            }
+        }
         let mut q = self.0.lock().unwrap();
         if q.len() == LOG_LINES {
             q.pop_front();
@@ -189,6 +220,15 @@ impl Server {
 
     /// Spawn the process. Does not wait for the model to load: see `wait_ready`.
     pub fn spawn(cfg: &ServerConfig, llama_root: &Path) -> Result<Server, UserError> {
+        Self::spawn_logged(cfg, llama_root, None)
+    }
+
+    /// [`Server::spawn`], also writing everything the server prints to `log_file`.
+    pub fn spawn_logged(
+        cfg: &ServerConfig,
+        llama_root: &Path,
+        log_file: Option<&Path>,
+    ) -> Result<Server, UserError> {
         let dir = llama_root.join(cfg.variant.dir_name());
         let exe = dir.join(crate::paths::server_exe_name());
         if !exe.is_file() {
@@ -231,7 +271,12 @@ impl Server {
                 return Err(UserError::server_start().with_detail(e.to_string()));
             }
         };
-        let log = LogRing::default();
+        let log = LogRing(
+            Arc::default(),
+            log_file
+                .and_then(LogFile::create)
+                .map(|f| Arc::new(Mutex::new(f))),
+        );
         for stream in [
             child
                 .stdout
@@ -518,6 +563,29 @@ mod tests {
             ExitKind::Corrupt
         );
         assert_eq!(classify_exit("something odd", Some(1)), ExitKind::Other);
+    }
+
+    #[test]
+    fn the_server_log_goes_to_a_file_and_keeps_the_previous_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("logs").join("llama-server.log");
+        let first = LogRing(
+            Arc::default(),
+            LogFile::create(&path).map(|f| Arc::new(Mutex::new(f))),
+        );
+        first.push("run 1".into());
+        drop(first);
+        let second = LogRing(
+            Arc::default(),
+            LogFile::create(&path).map(|f| Arc::new(Mutex::new(f))),
+        );
+        second.push("run 2".into());
+        drop(second);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "run 2\n");
+        assert_eq!(
+            std::fs::read_to_string(path.with_extension("previous.log")).unwrap(),
+            "run 1\n"
+        );
     }
 
     #[test]

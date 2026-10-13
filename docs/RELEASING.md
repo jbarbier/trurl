@@ -62,7 +62,7 @@ exists once a release is **published**, not while it is a draft.
   Learners would have to reinstall by hand. Keep the copy in a password manager.
 - **A new key.** For a fork, or after a leak, make a key and store its secrets:
   ```
-  npx @tauri-apps/cli@2.12.2 signer generate -w trurl-updater.key
+  (cd apps/desktop && npm ci && npx --no -- tauri signer generate -w ../../trurl-updater.key)
   gh secret set TAURI_SIGNING_PRIVATE_KEY < trurl-updater.key
   gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD      # paste the password you chose
   ```

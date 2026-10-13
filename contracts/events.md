@@ -81,7 +81,8 @@ RepoHit     { id, downloads, likes, gated, updated? }
 RepoDetails { id, author?, revision, gated, license?, downloads, likes, updated?, base_model?,
               architecture?, context_length?, parameters?, tags[], readme?, files: RepoFile[] }
 RepoFile    { path, size, sha256?, quant?, fit, split }
-Download    { id, repo, file, revision, dest_file, size, sha256?, done, rate,
+Download    { id, repo, file, revision, dest_file, size, sha256?, done, rate, user_paused, synced,
               status: "running"|"retrying"|"paused"|"verifying"|"failed"|"done", error? }
+              synced: bytes known to be on disk (resume point after a power cut)
 UpdateInfo  { version, notes, date? }
 ```

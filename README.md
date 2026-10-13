@@ -194,7 +194,8 @@ when it starts:
 - **AVX2:** Haswell, 2013, and newer.
 - **AVX:** Sandy Bridge and Ivy Bridge, 2011 to 2012, common in second-hand laptops.
 - **Compatible:** anything older. It contains no AVX instruction at all, which
-  `scripts/check_cpu_isa.py` proves on every build.
+  `scripts/check_cpu_isa.py` proves on every build, and it answers on an emulated
+  2004 Pentium 4 (`scripts/check_cpu_emulated.py`).
 
 If a computer cannot run the engine Trurl picked, Trurl moves down a level by itself.
 
@@ -209,6 +210,13 @@ The same model file, on the same computer, in Trurl and in the other free ways t
 it. Method and raw numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 <!-- benchmarks:start -->
+| | App on disk | Load time | First word | Speed | RAM, idle | RAM, answering | CPU, idle |
+|---|---|---|---|---|---|---|---|
+| Trurl | **54 MB** | **1.7 s** | 0.93 s | **8.1 (3.7 to 10.3)** | 980 MB | 980 MB | **0.0%** |
+| Ollama | 2,253 MB | 7.9 s | 0.85 s | **8.8 (6.2 to 11.1)** | 954 MB | 954 MB | **0.0%** |
+| llamafile | 368 MB | 2.6 s | **0.8 s** | **5.7 (4.6 to 7.3)** | **936 MB** | **936 MB** | **0.0%** |
+
+DO-Premium-AMD, 2 threads, 7.8 GB RAM, no GPU. Model: `gemma-3-1b-it-Q4_K_M.gguf` for every app, context 2,048, temperature 0, answers of up to 128 tokens, median of 3 prompts x 5 rounds (the apps take turns each round), speed range in brackets. Measured 2026-10-13 by `scripts/benchmark.py`.
 <!-- benchmarks:end -->
 
 ## For teachers
@@ -229,7 +237,15 @@ to make one, with the three models, and how to add your own.
 | `/no_think` (1.3.4, 1.4.3) | Type it in the message; the thinking block stays empty. |
 | Run out of context (1.3.2) | Set **Context size** to 256, the smallest. llama.cpp rounds any context up to a multiple of 256, so the course's 200 behaves exactly like 256. |
 | Paste a whole web page (1.4.3) | Set **Context size** to 4,096 first: 2,048 tokens is about 1,500 words. |
+| Warmth is a setting: two system prompts (1.4.2) | Write the first in **System prompt**, ask, press **New chat**, change the prompt, ask again. The prompt stays until you change it, for every model. |
+| A study mode written as a system prompt (1.4.x) | Same box: "You are teaching me. Never give me the answer. Ask me one question at a time." |
+| Copy an answer into your notes (1.4.4) | **Copy** under the answer. In the terminal app, select the text with the mouse. |
 | Airplane mode | Everything works; only the Hugging Face tab asks for internet. |
+
+**When a model will not load,** Trurl says why in plain words. For the details, the
+model server's output is in `logs/llama-server.log` next to the models folder
+(`%LOCALAPPDATA%\CyberiadLabs\Trurl\logs` on Windows, `~/.local/share/trurl/logs`
+on Linux).
 
 ## Pinned versions
 

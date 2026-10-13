@@ -56,8 +56,15 @@ OpenSSL 3 on Linux. Many classroom computers do not have those.
 
 How the build is picked and kept honest:
 
-- **Proven tiers.** `scripts/check_cpu_isa.py` disassembles each build and fails if
-  a build uses an instruction its CPUs lack. `compat` contains zero AVX instructions.
+- **Proven tiers, twice.** `scripts/check_cpu_isa.py` disassembles each build and
+  fails if it uses an instruction its CPUs lack: on Linux the whole executable, on
+  Windows llama.cpp's own compiled code (the static Microsoft C runtime carries AVX
+  and FMA versions of some routines that it only uses after asking the CPU, which a
+  disassembler cannot tell apart from a real problem). Then
+  `scripts/check_cpu_emulated.py` runs each build under Intel's Software Development
+  Emulator pretending to be its oldest CPU (`compat` on a 2004 Pentium 4, `avx` on
+  Sandy Bridge, `avx2` on Haswell) and makes it answer. The emulator stops the
+  program on the first instruction that CPU lacks, so a pass means it really runs.
 - **Picked at start.** `hardware.rs` reads the CPU features (`is_x86_feature_detected!`,
   which also checks that the OS supports AVX) and picks the fastest build present.
 - **Stepping down.** If a build still crashes with an illegal-instruction error,
@@ -166,12 +173,27 @@ identical text.
 
 `TRURL_HOME` moves everything, for tests and portable use.
 
+**Next to the models** in the same data folder:
+
+- `settings.json`: the learner's settings and the optional Hugging Face token
+  (private to the account on Linux, mode 0600; written to a temporary file and renamed).
+- `logs/llama-server.log`: everything the model server printed in this run, and
+  `llama-server.previous.log` for the run before, at most 10 MB each. This is the
+  file to send when a model will not load.
+- `trurl.lock`: one Trurl per data folder. A second copy (another terminal tab)
+  says Trurl is already open and exits, instead of loading a second model a
+  4 GB laptop cannot hold. The desktop app uses Tauri's single-instance plugin too.
+- `downloads/`: unfinished Hugging Face downloads.
+
 **What counts as a model.**
 
 - Any `*.gguf` file whose header parses. Damaged files are listed as such.
 - Projector files (`mmproj*`) and the later parts of split models are hidden.
 - The header reader (`gguf.rs`) reads only metadata. It takes about 0.3 s for two
-  real models.
+  real models. It keeps at most 4 MB of strings from a file and refuses keys over
+  64 KB, so a damaged or hostile file cannot fill the memory at startup.
+- Only a plain file name in the models folder is ever loaded: a path from anywhere
+  else never reaches llama-server.
 
 **RAM fit**, shown as a dot next to every model, compares the file size with the
 computer's memory:
@@ -209,13 +231,24 @@ runs only when the learner opens the Hugging Face tab.
 - **Resuming.** Every attempt asks `huggingface.co/<repo>/resolve/<commit>/<file>`
   again with `Range: bytes=<have>-`. The signed CDN URL it redirects to is never
   stored, because it expires.
-- **Odd server answers.**
-  - A 200 (range ignored) restarts the download.
+- **Odd server answers.** Nothing on disk changes until the reply is known to be
+  the right file: a school proxy that ignores `Range`, or a web filter page sent
+  with status 200, never costs the learner the part already downloaded.
+  - A 200 (range ignored) is accepted only with exactly the expected size. It is
+    written over the part from byte 0, so matching bytes stay as they were.
+  - A 200 of any other size (a filter page) is refused and retried; the part is kept.
   - A 206 that starts earlier than asked is written from where it says.
-  - A 206 that starts later than asked restarts the download.
-  - A 416 means the file is complete.
-- **Drops.** A dropped connection is retried with backoff. Any progress resets the
-  retry budget.
+  - A 206 that starts later than asked is refused and retried.
+  - A 416 with the size reached means the file is complete; the check decides.
+- **Drops.** A dropped connection is retried for as long as Trurl is open, waiting
+  2, 5, 10, 20, then 40 seconds between tries. Any progress starts the waits again.
+  Pause and Cancel always work.
+- **Power cuts.** Every 5 seconds the part file is synced to disk and the job file
+  records how many bytes are safe (`synced`). The job file is written to a temporary
+  name and renamed, so a cut leaves the old one or the new one, never half of one.
+  At the next start the part is cut back to the synced bytes. Part files with no job
+  are deleted. Job files are re-checked: an edited one cannot rename the download
+  or point outside the models folder.
 - **Pause and restart.** Pause keeps the bytes. Downloads cut by closing Trurl carry
   on at the next start; the ones the learner paused stay paused.
 - **One writer.** One task at a time writes a file (a quick Pause then Resume waits
@@ -232,19 +265,25 @@ runs only when the learner opens the Hugging Face tab.
 | Desktop (Windows) | Tauri updater plugin. It reads `latest.json` from GitHub Releases (`windows-x86_64`). The minisign signature must also name the announced version (`requireSignedVersion`). |
 | Terminal app (Linux) | Reads the same `latest.json` (`linux-x86_64`) and checks the same key and the same signed version. It only replaces a folder that carries the `.trurl-app` marker. |
 
-**When it checks:** 15 s after launch (the model loads first), then every 24 hours,
-and when the learner clicks "Check for updates" in About. Offline or failed checks
-are silent.
+**When it checks:** 15 s after launch (the model loads first), then every 24 hours of
+wall-clock time (`update::CheckSchedule`, shared by both apps: a laptop that slept
+through the 24 hours checks within 10 minutes of waking), and when the learner
+clicks "Check for updates" in About. Never while an answer is being written.
+Offline or failed checks are silent.
 
-**"Later"** hides the offer until the next check.
+**"Later"** hides the offer until the next launch or the next 24-hour check.
 
 **"Update now":**
 
 - It is disabled while an answer is being written.
-- It downloads first, with a progress bar, while Trurl keeps working.
-- If an answer started meanwhile, it waits.
-- Then it stops only the model server and installs. If installing fails, the model
-  comes back and Trurl carries on as it was.
+- It downloads first, with a progress bar, while Trurl keeps working. No data for a
+  minute fails the download cleanly (the next "Update now" starts again); there is
+  no limit on the whole download, so a slow link still gets there.
+- If an answer started meanwhile, it waits, and keeps the downloaded bytes.
+- Then it stops only the model server and installs. `App::release_engine` checks
+  that no answer is running and blocks new ones in one step, so no answer can start
+  in between and be cut off. If installing fails, the model comes back and Trurl
+  carries on as it was.
 
 **Never touched:** updates replace the app only. The models and settings live in the
 data folder.

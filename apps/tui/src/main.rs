@@ -10,6 +10,8 @@ mod selfupdate;
 mod state;
 mod text;
 mod view;
+#[cfg(test)]
+mod parity_tests;
 
 use ratatui::crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event as TermEvent, KeyCode, KeyEvent,
@@ -23,7 +25,7 @@ use tokio::sync::mpsc;
 use trurl_core::app::{App, AppConfig};
 use trurl_core::downloads::{DownloadRequest, DownloadStatus};
 use trurl_core::errors::UserError;
-use trurl_core::events::Event;
+use trurl_core::events::{EngineState, Event};
 use trurl_core::hardware::RamFit;
 use trurl_core::settings::CONTEXT_CHOICES;
 
@@ -44,8 +46,6 @@ enum Msg {
     UpdateDone(Result<std::path::PathBuf, UserError>),
     Tick,
 }
-
-const UPDATE_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -78,10 +78,24 @@ fn main() {
 }
 
 async fn run() -> i32 {
+    let cfg = AppConfig::from_env("terminal");
+    let _instance = match cfg.paths.lock_instance() {
+        Ok(f) => Some(f),
+        Err(trurl_core::paths::InstanceError::AlreadyRunning) => {
+            eprintln!(
+                "Trurl is already open in another terminal window.\n\
+                 Use that one, or close it first: two copies would load two models,\n\
+                 and most laptops cannot hold both in memory."
+            );
+            return 1;
+        }
+        // Cannot lock (read-only folder, odd file system): carry on, as before.
+        Err(trurl_core::paths::InstanceError::Io(_)) => None,
+    };
     let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
     let core_tx = tx.clone();
     let core = App::start(
-        AppConfig::from_env("terminal"),
+        cfg,
         Arc::new(move |e| {
             let _ = core_tx.send(Msg::Core(e));
         }),
@@ -121,11 +135,22 @@ async fn run() -> i32 {
 
     // Update checks: once after start (the model loads first), then every 24 h.
     let up_tx = tx.clone();
+    let up_core = core.clone();
     tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(15)).await;
+        tokio::time::sleep(trurl_core::update::FIRST_CHECK_AFTER).await;
+        let mut schedule = trurl_core::update::CheckSchedule::default();
         loop {
-            let _ = up_tx.send(Msg::Update(selfupdate::check().await, false));
-            tokio::time::sleep(UPDATE_EVERY).await;
+            let now = std::time::SystemTime::now();
+            if schedule.due(now) && !up_core.is_generating() {
+                if up_tx
+                    .send(Msg::Update(selfupdate::check().await, false))
+                    .is_err()
+                {
+                    break;
+                }
+                schedule.checked(now);
+            }
+            tokio::time::sleep(trurl_core::update::SCHEDULE_TICK).await;
         }
     });
     // A slow tick keeps "Loading…" and download speeds fresh without busy redraws.
@@ -176,7 +201,15 @@ async fn handle(
     m: Msg,
 ) -> Option<std::path::PathBuf> {
     match m {
-        Msg::Core(e) => ui.apply(e),
+        Msg::Core(e) => {
+            ui.apply(e);
+            if ui.queued && !matches!(ui.engine, EngineState::Loading { .. }) {
+                ui.queued = false;
+                if matches!(ui.engine, EngineState::Ready { .. }) {
+                    send_input(ui, core);
+                }
+            }
+        }
         Msg::Paste(s) => {
             if let Some((_, ed)) = ui.prompt.as_mut() {
                 ed.insert_str(&s);
@@ -210,7 +243,7 @@ async fn handle(
                     };
                 }
                 Err(e) => {
-                    if e.code == trurl_core::ErrorCode::HubFailed {
+                    if e.code == trurl_core::ErrorCode::Offline {
                         ui.hub_view = HubView::Offline;
                     }
                     ui.notice = Some(e);
@@ -298,7 +331,13 @@ async fn on_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: Key
                         core.select_model(&file);
                         ui.screen = Screen::Chat;
                     }
+                    Confirm::Update { .. } => start_update(ui, core, tx),
                 }
+            }
+            // "Later": hidden until the next start or the next 24-hour check.
+            KeyCode::F(8) if matches!(c, Confirm::Update { .. }) => {
+                ui.confirm = None;
+                ui.update = UpdateState::Hidden;
             }
             KeyCode::Esc | KeyCode::Char('n') => ui.confirm = None,
             _ => {}
@@ -366,8 +405,13 @@ async fn on_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: Key
         _ => {}
     }
     // Update keys are function keys: a plain letter would steal the first letter of a message.
-    if k.code == KeyCode::F(7) && matches!(ui.update, UpdateState::Available(_)) {
-        start_update(ui, core, tx);
+    if k.code == KeyCode::F(7)
+        && let UpdateState::Available(u) = &ui.update
+    {
+        ui.confirm = Some(Confirm::Update {
+            version: u.version.clone(),
+            notes: u.notes.clone(),
+        });
         return;
     }
     if k.code == KeyCode::F(8) && matches!(ui.update, UpdateState::Available(_)) {
@@ -430,12 +474,7 @@ fn chat_key(ui: &mut Ui, core: &App, k: KeyEvent) {
         return;
     }
     if ctrl(&k, 't') {
-        if let Some(t) = ui.turns.iter().rev().find(|t| !t.reasoning.is_empty()) {
-            let id = t.id;
-            if !ui.toggled.remove(&id) {
-                ui.toggled.insert(id);
-            }
-        }
+        ui.toggle_all_thinking();
         return;
     }
     if ctrl(&k, 'r') {
@@ -447,6 +486,7 @@ fn chat_key(ui: &mut Ui, core: &App, k: KeyEvent) {
             if ui.generating {
                 core.stop_generation();
             } else {
+                ui.queued = false;
                 ui.notice = None;
                 ui.update_msg = None;
                 if matches!(ui.update, UpdateState::Failed(_)) {
@@ -465,13 +505,11 @@ fn chat_key(ui: &mut Ui, core: &App, k: KeyEvent) {
             if ui.input.text.trim().is_empty() || ui.generating {
                 return;
             }
-            match core.send(&ui.input.text) {
-                Ok(_) => {
-                    ui.input.clear();
-                    ui.notice = None;
-                }
-                Err(e) => ui.notice = Some(e),
+            if matches!(ui.engine, EngineState::Loading { .. }) {
+                ui.queued = true;
+                return;
             }
+            send_input(ui, core);
         }
         KeyCode::PageUp => ui.scroll += 10,
         KeyCode::PageDown => ui.scroll = ui.scroll.saturating_sub(10),
@@ -481,6 +519,16 @@ fn chat_key(ui: &mut Ui, core: &App, k: KeyEvent) {
         }
         KeyCode::End if ui.input.text.is_empty() => ui.scroll = 0,
         _ => edit(&mut ui.input, &k, false),
+    }
+}
+
+fn send_input(ui: &mut Ui, core: &App) {
+    match core.send(&ui.input.text) {
+        Ok(_) => {
+            ui.input.clear();
+            ui.notice = None;
+        }
+        Err(e) => ui.notice = Some(e),
     }
 }
 

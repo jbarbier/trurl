@@ -21,13 +21,16 @@ run_suite() { # suite port preload
   mkdir -p "$home/models"
   ln "$MODELS/gemma-3-1b-it-Q4_K_M.gguf" "$home/models/" 2>/dev/null || cp "$MODELS/gemma-3-1b-it-Q4_K_M.gguf" "$home/models/"
   ln "$MODELS/Qwen_Qwen3-0.6B-Q4_K_M.gguf" "$home/models/" 2>/dev/null || cp "$MODELS/Qwen_Qwen3-0.6B-Q4_K_M.gguf" "$home/models/"
-  TRURL_HOME="$home" LD_PRELOAD="$preload" NETBLOCK_LOG="$home/net.log" target/debug/trurl-bridge --port "$port" &
+  mkdir -p "target/e2e/$suite"
+  TRURL_HOME="$home" LD_PRELOAD="$preload" NETBLOCK_LOG="$home/net.log" target/debug/trurl-bridge --port "$port" 2> "target/e2e/$suite/bridge.log" &
   local pid=$!
   for _ in $(seq 1 50); do curl -s "http://127.0.0.1:$port/" >/dev/null && break; sleep 0.2; done
   local status=0
   (cd apps/bridge/e2e && node run.mjs --url "http://127.0.0.1:$port/" --suite "$suite" --out "../../../target/e2e/$suite") || status=$?
   kill "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
+  # Keep what the model server printed, next to the screenshots.
+  cp -r "$home/logs" "target/e2e/$suite/" 2>/dev/null || true
   rm -rf "$home"
   return $status
 }

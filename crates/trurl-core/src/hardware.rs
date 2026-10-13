@@ -251,6 +251,11 @@ mod tests {
         let h = Hardware::detect();
         assert!(h.total_ram > 256 * 1024 * 1024);
         assert!(h.threads() >= 1 && h.threads() <= h.logical_cores);
+        // The brief: threads = physical cores (hyper-threads only slow llama.cpp down).
+        assert_eq!(h.threads(), h.physical_cores.max(1));
+        if let Some(n) = sysinfo::System::physical_core_count() {
+            assert_eq!(h.physical_cores, n);
+        }
         assert!(free_space(std::path::Path::new(".")).unwrap() > 0);
     }
 }

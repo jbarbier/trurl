@@ -96,13 +96,12 @@ pub async fn install(
         return Err(UserError::update_failed().with_detail("the update is not a Trurl app folder"));
     }
     // An answer may have started while the update downloaded: never cut it off.
-    if core.is_generating() {
-        let _ = std::fs::remove_dir_all(&staging);
-        return Err(UserError::update_wait_for_answer());
-    }
     // From here on the old llama-server must not run from the old folder. If the
     // swap fails, the model comes back and Trurl carries on with the old version.
-    core.release_engine().await;
+    if let Err(e) = core.release_engine().await {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(e);
+    }
     if let Err(e) = std::fs::rename(&dir, &old) {
         let _ = std::fs::remove_dir_all(&staging);
         core.reload();

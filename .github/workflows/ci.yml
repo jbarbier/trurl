@@ -35,8 +35,8 @@ jobs:
           key: gates-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
       - run: rustup toolchain install
       - run: cargo fmt --all --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
       - run: python3 scripts/check_pins.py
       - run: python3 scripts/check_copy.py
       - run: python3 scripts/check_network.py
@@ -66,6 +66,10 @@ jobs:
         run: test -x vendor/llama/linux/compat/llama-server || python3 scripts/build_llama.py
       - name: Each llama-server build uses only its CPU tier's instructions
         run: python3 scripts/check_cpu_isa.py vendor/llama/linux && python3 scripts/check_pe_imports.py vendor/llama/linux
+      - name: Each build answers on an emulated CPU of its tier (Intel SDE)
+        run: |
+          python3 scripts/fetch_models.py --dest "$TRURL_TEST_MODELS" --test-models
+          python3 scripts/check_cpu_emulated.py vendor/llama/linux --model "$TRURL_TEST_MODELS/stories260K-f32.gguf"
       - name: Evals, offline
         run: bash scripts/run_evals.sh
       - name: UI end-to-end (bridge + Chromium at 1366x768)
@@ -104,22 +108,34 @@ jobs:
         run: if (-not (Test-Path vendor/llama/windows/compat/llama-server.exe)) { python scripts/build_llama.py }
       - name: Check llama-server needs no DLL beyond Windows itself
         run: python scripts/check_pe_imports.py vendor/llama/windows
-      - name: Each llama-server build uses only its CPU tier's instructions
+      - name: llama.cpp's own code uses only its CPU tier's instructions
         env:
           OBJDUMP: C:\Program Files\LLVM\bin\llvm-objdump.exe
-        run: python scripts/check_cpu_isa.py vendor/llama/windows
+        run: |
+          $c = (Get-Content pins.json | ConvertFrom-Json).llama_cpp.commit.Substring(0, 12)
+          python scripts/check_cpu_isa.py --objects "$HOME/.cache/trurl/build-windows-$c"
+          if ($LASTEXITCODE -ne 0) { throw "CPU tier check failed" }
+      - name: Each build answers on an emulated CPU of its tier (Intel SDE)
+        run: |
+          python scripts/fetch_models.py --dest $env:TRURL_TEST_MODELS --test-models
+          if ($LASTEXITCODE -ne 0) { throw "fetch_models failed" }
+          python scripts/check_cpu_emulated.py vendor/llama/windows --model "$env:TRURL_TEST_MODELS/stories260K-f32.gguf"
+          if ($LASTEXITCODE -ne 0) { throw "a build crashed on its oldest CPU" }
       - name: Unit tests
-        run: cargo test -p trurl-core
+        run: cargo test --locked -p trurl-core
       - name: Evals with outbound network blocked by the firewall
         run: ./scripts/run_evals.ps1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
-      - name: Icons from branding/app-icon.svg
-        run: npx --yes @tauri-apps/cli@2.12.2 icon branding/app-icon.svg -o apps/desktop/src-tauri/icons
+      - name: Tauri CLI from its lockfile, then the icons from branding/app-icon.svg
+        working-directory: apps/desktop
+        run: |
+          npm ci --no-audit --no-fund
+          npx --no -- tauri icon ../../branding/app-icon.svg -o src-tauri/icons
       - name: Build the USB installer
         working-directory: apps/desktop
-        run: npx --yes @tauri-apps/cli@2.12.2 build --config src-tauri/tauri.usb.conf.json
+        run: npx --no -- tauri build --config src-tauri/tauri.usb.conf.json -- --locked
       - name: Install from a USB-style folder, run offline, chat, uninstall
         run: ./scripts/windows_smoke.ps1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -159,7 +175,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
-      - run: npx --yes @tauri-apps/cli@2.12.2 icon branding/app-icon.svg -o apps/desktop/src-tauri/icons
+      - name: Tauri CLI from its lockfile, then the icons from branding/app-icon.svg
+        working-directory: apps/desktop
+        run: |
+          npm ci --no-audit --no-fund
+          npx --no -- tauri icon ../../branding/app-icon.svg -o src-tauri/icons
       - name: Build N, install it, build and sign N+1, update through the real window
         run: ./scripts/windows_update_test.ps1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

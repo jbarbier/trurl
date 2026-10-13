@@ -15,11 +15,15 @@ $work = Join-Path $env:RUNNER_TEMP "trurl-update-test"
 $srv = Join-Path $work "srv"
 New-Item -ItemType Directory -Force $srv | Out-Null
 function Step($msg) { Write-Host "`n=== $msg" }
-$tauri = "@tauri-apps/cli@2.12.2"
+# The Tauri CLI pinned by apps/desktop/package-lock.json.
+Push-Location apps/desktop
+npm ci --no-audit --no-fund
+Pop-Location
+$tauri = (Resolve-Path "apps/desktop/node_modules/.bin/tauri.cmd").Path
 
 Step "Throwaway signing key and test updater settings"
 $key = Join-Path $work "test.key"
-npx --yes $tauri signer generate --ci -w $key -p test | Out-Null
+& $tauri signer generate --ci -w $key -p test | Out-Null
 $pub = (Get-Content "$key.pub" -Raw).Trim()
 $conf = Join-Path $work "update-test.conf.json"
 @{ plugins = @{ updater = @{ pubkey = $pub; endpoints = @("http://127.0.0.1:8899/latest.json"); dangerousInsecureTransportProtocol = $true } } } |
@@ -31,7 +35,7 @@ $vNext = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
 
 Step "Build version $vN"
 Push-Location apps/desktop
-npx --yes $tauri build --config $conf
+& $tauri build --config $conf -- --locked
 Pop-Location
 $setupN = Join-Path $work "N-setup.exe"
 Copy-Item (Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1).FullName $setupN
@@ -48,11 +52,11 @@ Step "Build version $vNext, sign it, publish latest.json on localhost"
 python scripts/bump_version.py $vNext
 "## $vNext`n`nTest release made by scripts/windows_update_test.ps1." | Add-Content CHANGELOG.md
 Push-Location apps/desktop
-npx --yes $tauri build --config $conf
+& $tauri build --config $conf -- --locked
 Pop-Location
 $setupNext = Join-Path $srv "Trurl_${vNext}_x64-setup.exe"
 Copy-Item (Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1).FullName $setupNext
-npx --yes $tauri signer sign -f $key -p test --app-version $vNext $setupNext
+& $tauri signer sign -f $key -p test --app-version $vNext $setupNext
 python scripts/release_notes.py $vNext | Set-Content -Encoding utf8 (Join-Path $work "notes.md")
 python scripts/make_manifest.py --version $vNext --notes-file (Join-Path $work "notes.md") --windows $setupNext --base-url "http://127.0.0.1:8899" --out (Join-Path $srv "latest.json")
 $server = Start-Process python -ArgumentList "-m", "http.server", "8899", "--bind", "127.0.0.1", "--directory", $srv -PassThru

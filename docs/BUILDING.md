@@ -32,6 +32,8 @@ python3 scripts/build_llama.py
   ```
   python3 scripts/check_pe_imports.py vendor/llama/linux        # or vendor/llama/windows
   python3 scripts/check_cpu_isa.py vendor/llama/linux           # each build uses only its CPU tier
+  python3 scripts/check_cpu_emulated.py --model ~/.cache/trurl/models/stories260K-f32.gguf
+                                       # each build answers on an emulated oldest CPU (Intel SDE)
   ```
 
 ## 2. Get the models
@@ -47,11 +49,12 @@ in `pins.json`.
 ## 3a. Desktop app (Windows)
 
 ```
-npx @tauri-apps/cli@2.12.2 icon branding/app-icon.svg -o apps/desktop/src-tauri/icons
 cd apps/desktop
-npx @tauri-apps/cli@2.12.2 dev                                        # run it
-npx @tauri-apps/cli@2.12.2 build                                      # installer in target/release/bundle/nsis/
-npx @tauri-apps/cli@2.12.2 build --config src-tauri/tauri.usb.conf.json   # the USB installer (embeds WebView2)
+npm ci                                                     # the Tauri CLI, exactly as package-lock.json pins it
+npx --no -- tauri icon ../../branding/app-icon.svg -o src-tauri/icons
+npx --no -- tauri dev                                      # run it
+npx --no -- tauri build                                    # installer in target/release/bundle/nsis/
+npx --no -- tauri build --config src-tauri/tauri.usb.conf.json   # the USB installer (embeds WebView2)
 ```
 
 The build needs no signing key: updates are signed by the release workflow, after the
