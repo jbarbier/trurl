@@ -63,6 +63,25 @@ pub struct Snapshot {
     pub turns: Vec<Turn>,
     pub generating: bool,
     pub downloads: Vec<DownloadInfo>,
+    /// The models the course uses, in course order. Fixed for a given Trurl version.
+    pub course_models: Vec<CourseModel>,
+}
+
+/// A course model: one click downloads exactly this pinned file
+/// (`download_course_model`), so nobody picks a look-alike on Hugging Face.
+#[derive(Debug, Clone, Serialize)]
+pub struct CourseModel {
+    pub id: String,
+    pub name: String,
+    /// What the course uses it for, in one line.
+    pub note: String,
+    /// The file name it gets in the models folder.
+    pub file: String,
+    pub size: u64,
+    pub fit: RamFit,
+    /// The id its pinned download gets. A front end matches downloads on this,
+    /// never on the file name: a search download of another commit can share it.
+    pub download_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

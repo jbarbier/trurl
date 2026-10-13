@@ -241,7 +241,14 @@ async fn handle(
             } else {
                 HubView::Offline
             };
-            ui.hub_focus = HubFocus::Input;
+            ui.hub_focus = if on {
+                ui.hub_start_focus()
+            } else {
+                HubFocus::Input
+            };
+            if let Some(i) = ui.first_missing_course() {
+                ui.course_sel = i;
+            }
         }
         Msg::HubResults(r) => {
             ui.hub_busy = false;
@@ -832,14 +839,16 @@ fn hub_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: KeyEvent
         }
     }
     if k.code == KeyCode::Tab {
+        let course = ui.hub_view == HubView::Search && !ui.course_models.is_empty();
         ui.hub_focus = match (ui.hub_view.clone(), ui.hub_focus) {
-            (_, HubFocus::Downloads) => match ui.hub_view {
-                HubView::Details => HubFocus::Files,
-                _ => HubFocus::Input,
-            },
+            (HubView::Details, HubFocus::Downloads) => HubFocus::Files,
+            (_, HubFocus::Downloads) if course => HubFocus::Course,
+            (_, HubFocus::Downloads) => HubFocus::Input,
+            (HubView::Search, HubFocus::Course) => HubFocus::Input,
             (HubView::Search, HubFocus::Input) if !ui.hub_results.is_empty() => HubFocus::Results,
             _ if !ui.downloads.is_empty() => HubFocus::Downloads,
             (HubView::Details, _) => HubFocus::Files,
+            _ if course => HubFocus::Course,
             _ => HubFocus::Input,
         };
         return;
@@ -857,6 +866,69 @@ fn hub_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: KeyEvent
         },
         HubView::Search => match (ui.hub_focus, k.code) {
             (_, KeyCode::Esc) => ui.screen = Screen::Chat,
+            (HubFocus::Course, KeyCode::Up) => ui.course_sel = ui.course_sel.saturating_sub(1),
+            (HubFocus::Course, KeyCode::Down) => {
+                if ui.course_sel + 1 >= ui.course_models.len() {
+                    ui.hub_focus = HubFocus::Input;
+                } else {
+                    ui.course_sel += 1;
+                }
+            }
+            (HubFocus::Course, KeyCode::Enter) => {
+                let Some(c) = ui.course_models.get(ui.course_sel).cloned() else {
+                    return;
+                };
+                if let Some(m) = ui.course_model_here(&c).cloned() {
+                    if m.broken {
+                        ui.say(format!(
+                            "{} is damaged: delete it in Models (F2), then download it again.",
+                            c.name
+                        ));
+                    } else if ui.running_file() == Some(m.file.as_str()) {
+                        ui.say(format!("{} is the model in use.", c.name));
+                    } else {
+                        core.select_model(&m.file);
+                        ui.screen = Screen::Chat;
+                    }
+                } else if ui.course_clash(&c) {
+                    ui.say(format!(
+                        "A different file named {} is on this computer: delete it in Models (F2), then download the course one.",
+                        c.file
+                    ));
+                } else if let Some(d) = ui.course_download(&c).cloned() {
+                    if d.status == DownloadStatus::Failed {
+                        if let Err(e) = core.download_resume(&d.id) {
+                            ui.notice = Some(e);
+                        }
+                    } else {
+                        // Select that download, so P acts on it and not on another one.
+                        if let Some(i) = ui.downloads.iter().position(|x| x.id == d.id) {
+                            ui.dl_sel = i;
+                        }
+                        ui.hub_focus = HubFocus::Downloads;
+                        ui.say(format!(
+                            "{} is already downloading: P pauses or resumes it.",
+                            c.name
+                        ));
+                    }
+                } else {
+                    match core.download_course_model(&c.id) {
+                        Ok(_) => ui.say(format!("Downloading {}.", c.name)),
+                        Err(e) => ui.notice = Some(e),
+                    }
+                }
+            }
+            // Typing on the list starts a search, as it would in the box.
+            (HubFocus::Course, KeyCode::Char(_))
+                if !k.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                ui.hub_focus = HubFocus::Input;
+                edit(&mut ui.hub_query, &k, false);
+            }
+            (HubFocus::Course, _) => {}
+            (HubFocus::Input, KeyCode::Up) if !ui.course_models.is_empty() => {
+                ui.hub_focus = HubFocus::Course
+            }
             (HubFocus::Input, KeyCode::Enter) => {
                 let q = ui.hub_query.text.trim().to_string();
                 if q.is_empty() {

@@ -8,7 +8,7 @@
 use crate::chat::{self, ChatRequest, StreamDelta, StreamEnd, Turn, TurnStatus};
 use crate::downloads::{DownloadInfo, DownloadRequest, Downloads};
 use crate::errors::UserError;
-use crate::events::{EngineState, Event, HardwareSummary, PublicSettings, Snapshot};
+use crate::events::{CourseModel, EngineState, Event, HardwareSummary, PublicSettings, Snapshot};
 use crate::hardware::{CpuVariant, Hardware};
 use crate::hub::{HF_BASE, Hub, RepoFiles, RepoHit};
 use crate::models::{self, ModelInfo, VerifiedCache};
@@ -228,6 +228,17 @@ impl App {
             turns: st.turns.clone(),
             generating: st.generating,
             downloads: self.downloads().list(),
+            course_models: crate::pins::course_models()
+                .map(|m| CourseModel {
+                    id: m.id.clone(),
+                    name: m.name.clone(),
+                    note: m.course.clone().unwrap_or_default(),
+                    file: m.file.clone(),
+                    size: m.size,
+                    fit: crate::hardware::ram_fit(m.size, hw.total_ram),
+                    download_id: crate::downloads::download_id(&m.repo, &m.file, &m.revision),
+                })
+                .collect(),
         }
     }
 
@@ -997,6 +1008,20 @@ impl App {
     pub fn download_start(&self, req: DownloadRequest) -> Result<String, UserError> {
         self.downloads().start(req)
     }
+    /// Download a course model by its id in pins.json: the pinned repo, commit,
+    /// file, size and SHA-256, never what a front end passes.
+    pub fn download_course_model(&self, id: &str) -> Result<String, UserError> {
+        let m = crate::pins::course_models()
+            .find(|m| m.id == id)
+            .ok_or_else(|| UserError::internal(format!("no course model {id}")))?;
+        self.download_start(DownloadRequest {
+            repo: m.repo.clone(),
+            file: m.file.clone(),
+            revision: m.revision.clone(),
+            size: m.size,
+            sha256: Some(m.sha256.clone()),
+        })
+    }
     pub fn download_pause(&self, id: &str) {
         self.downloads().pause(id)
     }
@@ -1068,6 +1093,7 @@ mod tests {
             size: 1,
             fit: RamFit::Green,
             bundled: false,
+            course: false,
             verified: None,
             broken,
             has_chat_template: true,

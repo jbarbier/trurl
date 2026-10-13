@@ -33,19 +33,21 @@
       "sha256": "8ccc5cd1f1b3602548715ae25a66ed73fd5dc68a210412eea643eb20eb75a135",
       "license": "Gemma Terms of Use",
       "license_file": "licenses/Gemma-Terms-of-Use.txt",
-      "default": true
+      "default": true,
+      "course": "The model you use for the whole course."
     },
     {
-      "id": "gemma-3-4b-it",
-      "name": "Gemma 3 4B Instruct",
-      "repo": "ggml-org/gemma-3-4b-it-GGUF",
-      "revision": "d0976223747697cb51e056d85c532013931fe52e",
-      "file": "gemma-3-4b-it-Q4_K_M.gguf",
-      "size": 2489757856,
-      "sha256": "882e8d2db44dc554fb0ea5077cb7e4bc49e7342a1f0da57901c0802ea21a0863",
+      "id": "gemma-3-1b-pt",
+      "name": "Gemma 3 1B PT",
+      "repo": "mradermacher/gemma-3-1b-pt-GGUF",
+      "revision": "c8be8bea82bae62e3a2ea0f160bc24cc3fab8824",
+      "file": "gemma-3-1b-pt.Q4_K_M.gguf",
+      "size": 806056864,
+      "sha256": "caf1c278f8a8ba1e4605af68b6c17c91a18bf315b38bd52efc542d009d19dd57",
       "license": "Gemma Terms of Use",
       "license_file": "licenses/Gemma-Terms-of-Use.txt",
-      "default": false
+      "default": false,
+      "course": "Optional. The same model before it was taught to answer: it continues your text and does not stop by itself, so you stop it."
     },
     {
       "id": "qwen3-0.6b",
@@ -57,6 +59,19 @@
       "sha256": "9acfc1e001311f34b4252001b626f2e466d592a42065f66571bff3790d4e1b14",
       "license": "Apache-2.0",
       "license_file": "licenses/Qwen3-Apache-2.0.txt",
+      "default": false,
+      "course": "A model trained to think before it answers. You watch its thinking as it writes."
+    },
+    {
+      "id": "gemma-3-4b-it",
+      "name": "Gemma 3 4B Instruct",
+      "repo": "ggml-org/gemma-3-4b-it-GGUF",
+      "revision": "d0976223747697cb51e056d85c532013931fe52e",
+      "file": "gemma-3-4b-it-Q4_K_M.gguf",
+      "size": 2489757856,
+      "sha256": "882e8d2db44dc554fb0ea5077cb7e4bc49e7342a1f0da57901c0802ea21a0863",
+      "license": "Gemma Terms of Use",
+      "license_file": "licenses/Gemma-Terms-of-Use.txt",
       "default": false
     }
   ],

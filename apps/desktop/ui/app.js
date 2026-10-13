@@ -131,6 +131,7 @@
     engine: { state: "idle" },
     generating: false,
     downloads: [],
+    course_models: [], // [{ id, name, note, file, size, fit }], fixed per Trurl version
     importing: null, // { file, done, total }
     verifying: null, // { file, done, total }
     update: null, // { info, phase: "offer"|"installing"|"failed", done, total, error, hidden }
@@ -671,7 +672,7 @@
             "div",
             { class: "big-actions" },
             h("button", { class: "big-action", type: "button", "data-import": "" }, svg(ICON.usb), h("strong", { text: "Import a model file" }), h("span", { text: "From a USB stick or a folder on this computer." })),
-            h("button", { class: "big-action", type: "button", onclick: () => openModels("hub") }, svg(ICON.download), h("strong", { text: "Download from Hugging Face" }), h("span", { text: "Needs internet once. Small models (under 1 GB) work best." }))
+            h("button", { class: "big-action", type: "button", onclick: () => openModels("hub") }, svg(ICON.download), h("strong", { text: "Download the course models" }), h("span", { text: "Or any model on Hugging Face. Needs internet once." }))
           ),
           h("div", { class: "import-slot" }),
           h("p", { class: "small", text: "Once a model is on this computer, it works without internet." })
@@ -855,7 +856,7 @@
   async function deleteModel(m) {
     const go = await confirmBox({
       title: `Delete ${m.name}?`,
-      text: `This frees ${fmt.size(m.size)} on this computer. ${m.bundled ? "It came with Trurl, so you need the USB stick or internet to get it back." : "You can import or download it again later."}`,
+      text: `This frees ${fmt.size(m.size)} on this computer. ${m.course ? "To get it back, download it again under Hugging Face, For the course, or import it from the USB stick." : m.bundled ? "To get it back, import it from the USB stick or download it again." : "You can import or download it again later."}`,
       ok: "Delete",
       danger: true,
     });
@@ -889,7 +890,7 @@
                 [m.quant, fmt.size(m.size)].filter(Boolean).join(" · "),
                 fitEl(m.fit),
                 m.broken && h("span", { class: "tag tag-take", text: "Damaged file" }),
-                m.bundled && h("span", { class: "tag tag-a", text: "Included with Trurl" }),
+                m.course ? h("span", { class: "tag tag-a", text: "Course model" }) : m.verified === true && h("span", { class: "tag tag-a", title: "The same file, byte for byte, as the one Trurl was tested with.", text: "Checked by Trurl" }),
                 inUse && h("span", { class: "tag tag-held", text: "In use" }),
                 checking && h("span", { class: "tag", text: `Checking the file ${fmt.pct(S.verifying.done, S.verifying.total)}%` })
               ),
@@ -905,6 +906,7 @@
         })
       );
     });
+    renderCourse();
   }
 
   async function importModel() {
@@ -944,6 +946,28 @@
     failed: ["Failed", "take"],
     done: ["Done", ""],
   };
+
+  // The Downloads list sits at the top of the Models dialog. A learner who
+  // clicked Download further down would not see it start, so scroll it into view.
+  let reveal = null; // id of a download just started, until its row is on screen
+  async function startDownload(cmd, args) {
+    const id = await run(cmd, args);
+    if (!id) return;
+    reveal = id;
+    renderDownloads();
+  }
+  async function resumeDownload(id) {
+    await run("download_resume", { id });
+    reveal = id;
+    renderDownloads();
+  }
+  function revealDownload() {
+    const li = reveal && $("dlList").querySelector(`[data-id="${CSS.escape(reveal)}"]`);
+    if (!li) return;
+    reveal = null;
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    li.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
+  }
 
   function renderDownloads() {
     const list = $("dlList");
@@ -1012,6 +1036,8 @@
       chip.textContent = `${active.length} download${active.length > 1 ? "s" : ""} · ${fmt.pct(done, size)}%`;
     }
     if (hub.details) renderFiles();
+    renderCourse();
+    revealDownload();
   }
 
   // ---------- Models: Hugging Face ---------------------------------------
@@ -1038,8 +1064,129 @@
       "Try:",
       ["qwen3", "gemma 3", "llama 3.2"].map((q) => h("button", { class: "link-btn", type: "button", onclick: () => ((qInput.value = q), search(q)) }, q))
     );
-    Object.assign(hubEls, { status: h("div"), search: h("div", { class: "tabpanel" }, form, tryLine), results: h("div", { class: "tabpanel" }), details: h("div", { class: "tabpanel" }), qInput });
-    $("panelHub").append(hubEls.status, hubEls.search, hubEls.results, hubEls.details);
+    Object.assign(hubEls, {
+      course: h("section", { class: "course", "aria-labelledby": "courseTitle" }),
+      status: h("div"),
+      search: h("div", { class: "tabpanel" }, h("h3", { class: "sub-h", text: "Another model" }), form, tryLine),
+      results: h("div", { class: "tabpanel" }),
+      details: h("div", { class: "tabpanel" }),
+      qInput,
+    });
+    $("panelHub").append(hubEls.course, hubEls.status, hubEls.search, hubEls.results, hubEls.details);
+  }
+
+  // The course models: the exact pinned files, one click each, first on the
+  // download screen, so nobody picks a look-alike from a search.
+  const courseModel = (c) => S.models.find((m) => m.file === c.file && m.course);
+  // A different file under the course model's name (imported, or from another repo).
+  const courseClash = (c) => !courseModel(c) && S.models.find((m) => m.file === c.file);
+  // Its pinned download only: a search download of another commit can share the file name.
+  const courseDownload = (c) => S.downloads.find((d) => d.id === c.download_id && d.status !== "done");
+  // "In use" as in the terminal app: the model the engine runs or loads, not the saved choice.
+  const runningFile = () => (S.engine.state === "ready" || S.engine.state === "loading" ? S.engine.file : null);
+
+  // What a course row shows. Rows are rebuilt only when this changes, never on
+  // every download tick (a rebuild under the pointer would swallow a click).
+  function courseState(c) {
+    const have = courseModel(c);
+    if (have) return { kind: have.broken ? "broken" : have.file === runningFile() ? "inuse" : "here", have };
+    if (courseClash(c)) return { kind: "clash" };
+    const dl = courseDownload(c);
+    if (dl) return { kind: dl.status === "failed" ? "failed" : dl.status === "paused" ? "paused" : "downloading", dl };
+    return { kind: hub.online === true ? "missing" : hub.online === false ? "offline" : "checking" };
+  }
+
+  function courseRow(c, st) {
+    const key = "c:" + c.id;
+    const btn = (cls, label, onclick, extra = {}) => h("button", { class: "btn btn-small " + cls, type: "button", "data-key": key, onclick, ...extra }, label);
+    let tag = null;
+    let hint = null;
+    let act = null;
+    switch (st.kind) {
+      case "inuse":
+        tag = [h("span", { class: "tag tag-a", text: "On this computer" }), h("span", { class: "tag tag-held", text: "In use" })];
+        break;
+      case "here":
+        tag = h("span", { class: "tag tag-a", text: "On this computer" });
+        act = btn("btn-secondary", "Use", () => useModel(st.have), { "aria-label": `Use ${c.name}` });
+        break;
+      case "broken":
+        tag = h("span", { class: "tag tag-take", text: "Damaged file" });
+        hint = "This file is damaged. Delete it, then download it again.";
+        act = btn("btn-danger-quiet", "Delete", () => deleteModel(st.have), { "aria-label": `Delete the damaged ${c.name}` });
+        break;
+      case "clash":
+        tag = h("span", { class: "tag tag-rev", text: "Another file has this name" });
+        hint = `A different file named ${c.file} is on this computer. Delete it in On this computer, then download the course one.`;
+        break;
+      case "failed":
+        tag = h("span", { class: "tag tag-take", text: "Download failed" });
+        hint = st.dl.error ? `${st.dl.error.title} ${st.dl.error.hint || ""}`.trim() : null;
+        act = btn("btn-secondary", "Try again", () => resumeDownload(st.dl.id), { "aria-label": `Try downloading ${c.name} again`, disabled: hub.online !== true });
+        break;
+      case "paused":
+        tag = h("span", { class: "tag tag-rev", text: "Paused" });
+        act = btn("btn-secondary", "Resume", () => resumeDownload(st.dl.id), { "aria-label": `Resume downloading ${c.name}`, disabled: hub.online !== true });
+        break;
+      case "downloading":
+        act = h("span", { class: "dl-status course-pct", "data-key": key, tabindex: "-1" });
+        break;
+      default: // missing, offline, checking
+        act = h(
+          "button",
+          { class: "btn btn-primary btn-small", type: "button", "data-key": key, disabled: st.kind !== "missing", "aria-label": `Download ${c.name}, ${fmt.size(c.size)}`, onclick: () => startDownload("download_course_model", { id: c.id }) },
+          svg(ICON.download),
+          "Download"
+        );
+    }
+    return h(
+      "li",
+      { class: "row course-row", "data-course": c.id, "data-state": st.kind },
+      h(
+        "div",
+        { class: "row-main" },
+        h("span", { class: "row-name", text: c.name }),
+        h("span", { class: "row-meta" }, fmt.size(c.size), fitEl(c.fit), tag),
+        h("span", { class: "row-hint course-note", text: c.note }),
+        hint && h("span", { class: "row-hint", text: hint })
+      ),
+      h("div", { class: "row-acts" }, act)
+    );
+  }
+
+  function renderCourse() {
+    const el = hubEls.course;
+    if (!el) return;
+    el.hidden = !S.course_models.length || !!(hub.details || hub.loading);
+    if (el.hidden) return;
+    if (!el.firstChild) {
+      el.ui = { offline: h("p", { class: "muted", text: "Connect to the internet to download them, or import them from the USB stick in On this computer." }), list: h("ul", { class: "model-list" }) };
+      put(el, [h("h3", { class: "sub-h", id: "courseTitle", text: "For the course" }), h("p", { class: "muted", text: "The exact files the course uses, checked by Trurl. Download these rather than searching." }), el.ui.offline, el.ui.list]);
+    }
+    const states = S.course_models.map((c) => [c, courseState(c)]);
+    el.ui.offline.hidden = !(hub.online === false && states.some(([, st]) => st.kind === "offline"));
+    const list = el.ui.list;
+    // Same models in the same order: patch the rows; anything else: start over.
+    if ([...list.children].map((li) => li.dataset.course).join() !== S.course_models.map((c) => c.id).join()) list.replaceChildren();
+    states.forEach(([c, st], i) => {
+      const old = list.children[i];
+      // Try again and Resume wait for a connection, like Download: redraw when it changes.
+      const sig = st.kind + (st.dl ? ":" + st.dl.id + ":" + hub.online : "");
+      if (!old || old.dataset.sig !== sig) {
+        keepFocus(list, () => {
+          const li = courseRow(c, st);
+          li.dataset.sig = sig;
+          if (old) old.replaceWith(li);
+          else list.append(li);
+        });
+      }
+      if (st.kind === "downloading" || st.kind === "paused") {
+        const [word, tone] = DL_WORDS[st.dl.status] || [st.dl.status, ""];
+        const pct = list.children[i].querySelector(".course-pct");
+        if (pct) pct.textContent = `${word} ${fmt.pct(st.dl.done, st.dl.size)}%`;
+        if (pct) pct.className = "dl-status course-pct " + tone;
+      }
+    });
   }
 
   async function checkHub() {
@@ -1104,6 +1251,7 @@
         );
       } else results.replaceChildren();
     }
+    renderCourse();
     if (hub.loading) details.replaceChildren(backButton(), h("p", { class: "state-msg" }, spinner(), `Loading ${hub.loading}…`));
     else if (hub.details) renderDetails();
   }
@@ -1222,35 +1370,53 @@
   function renderFiles() {
     const d = hub.details;
     if (!d || !hubEls.files) return;
-    keepFocus(hubEls.files, () => {
-      // The core lists the file to pick on this computer first, marked recommended.
-      hubEls.files.replaceChildren(
-        ...d.files.map((f) => {
-          const dest = basename(f.path);
-          const local = S.models.some((m) => m.file === dest);
-          const dl = S.downloads.find((x) => x.dest_file === dest);
-          let action;
-          if (f.split) action = h("span", { class: "muted", text: "Split file, not supported" });
-          else if (local) action = h("span", { class: "tag tag-held", text: "On this computer" });
-          else if (dl) action = h("span", { class: "tag tag-a", text: DL_WORDS[dl.status] ? DL_WORDS[dl.status][0] : dl.status });
-          else
-            action = h(
-              "button",
-              { class: "btn btn-secondary btn-small", type: "button", "data-key": "dl:" + f.path, "aria-label": `Download ${f.quant || dest}, ${fmt.size(f.size)}`, onclick: () => run("download_start", { repo: d.id, file: f.path, revision: d.revision, size: f.size, sha256: f.sha256 || null }) },
-              svg(ICON.download),
-              "Download"
-            );
-          const recommended = !!f.recommended;
-          return h(
-            "tr",
-            null,
-            h("td", null, h("span", { class: "q", text: f.quant || "Unknown" }), recommended && h("span", { class: "tag tag-held rec", text: "Recommended" }), h("span", { class: "p", text: f.path })),
-            h("td", { class: "num", text: fmt.size(f.size) }),
-            h("td", null, fitEl(f.fit)),
-            h("td", null, action)
-          );
-        })
+    // Downloads tick several times a second. Each row's action cell is replaced
+    // only when that row's state changes, so a button is never swapped under the
+    // pointer of a learner about to click it.
+    const rowState = (f) => {
+      const dest = basename(f.path);
+      const dl = S.downloads.find((x) => x.dest_file === dest);
+      return f.split ? "split" : S.models.some((m) => m.file === dest) ? "here" : dl ? dl.status : "";
+    };
+    const action = (f) => {
+      const dest = basename(f.path);
+      const st = rowState(f);
+      if (st === "split") return h("span", { class: "muted", text: "Split file, not supported" });
+      if (st === "here") return h("span", { class: "tag tag-held", text: "On this computer" });
+      if (st) return h("span", { class: "tag tag-a", text: DL_WORDS[st] ? DL_WORDS[st][0] : st });
+      return h(
+        "button",
+        { class: "btn btn-secondary btn-small", type: "button", "data-key": "dl:" + f.path, "aria-label": `Download ${f.quant || dest}, ${fmt.size(f.size)}`, onclick: () => startDownload("download_start", { repo: d.id, file: f.path, revision: d.revision, size: f.size, sha256: f.sha256 || null }) },
+        svg(ICON.download),
+        "Download"
       );
+    };
+    const tb = hubEls.files;
+    if (tb.dataset.repo !== d.id || tb.children.length !== d.files.length) {
+      tb.dataset.repo = d.id;
+      // The core lists the file to pick on this computer first, marked recommended.
+      keepFocus(tb, () =>
+        tb.replaceChildren(
+          ...d.files.map((f) =>
+            h(
+              "tr",
+              { "data-state": rowState(f) },
+              h("td", null, h("span", { class: "q", text: f.quant || "Unknown" }), f.recommended && h("span", { class: "tag tag-held rec", text: "Recommended" }), h("span", { class: "p", text: f.path })),
+              h("td", { class: "num", text: fmt.size(f.size) }),
+              h("td", null, fitEl(f.fit)),
+              h("td", null, action(f))
+            )
+          )
+        )
+      );
+      return;
+    }
+    d.files.forEach((f, i) => {
+      const tr = tb.children[i];
+      const st = rowState(f);
+      if (tr.dataset.state === st) return;
+      tr.dataset.state = st;
+      keepFocus(tr, () => tr.lastElementChild.replaceChildren(action(f)));
     });
   }
 
@@ -1499,6 +1665,7 @@
       engine: s.engine || { state: "idle" },
       generating: !!s.generating,
       downloads: s.downloads || [],
+      course_models: s.course_models || [],
     });
     applySettings();
     resetTranscript(s.turns || []);

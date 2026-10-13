@@ -236,6 +236,133 @@ if (SUITE === "full") {
     await shot(page, "models");
   });
 
+  await step("course models: listed first on the download screen, in course order", async () => {
+    await openModels("hub");
+    await page.locator(".course-row").nth(2).waitFor({ timeout: 30000 });
+    const rows = await page.locator(".course-row").allInnerTexts();
+    const names = rows.map((r) => r.split("\n")[0].trim());
+    if (names.join(" | ") !== "Gemma 3 1B Instruct | Gemma 3 1B PT | Qwen3 0.6B") throw new Error("course rows: " + names.join(" | "));
+    // The test home holds the Gemma 3 1B and Qwen3 0.6B files: those two are here, the PT one is not.
+    const row = (id) => page.locator(`.course-row[data-course="${id}"]`);
+    for (const id of ["gemma-3-1b-it", "qwen3-0.6b"]) if (!(await row(id).getByText("On this computer").count())) throw new Error(id + " not shown as on this computer");
+    // The search box shows once the internet check answers; then Download is enabled.
+    await page.locator("#hubQuery").waitFor({ timeout: 30000 });
+    const dl = row("gemma-3-1b-pt").getByRole("button", { name: /^Download Gemma 3 1B PT, 806 MB$/ });
+    if (!(await dl.isEnabled())) throw new Error("the PT download button is not enabled online");
+    await shot(page, "course-models");
+    await openModels("local");
+    if (!(await page.locator("#modelList li", { hasText: "Gemma 3 1B Instruct" }).getByText("Course model").count())) throw new Error("no Course model tag in the local list");
+  });
+
+  if (!CDP)
+    await step("course models: one click downloads, checks and installs (mock core)", async () => {
+      const ui = new URL("../../desktop/ui/index.html?mock", import.meta.url).href;
+      const p = await browser.newPage({ viewport: { width: W, height: H } });
+      try {
+        await p.goto(ui);
+        await p.click("#openModels");
+        await p.click("#tabHub");
+        const row = p.locator('.course-row[data-course="gemma-3-1b-pt"]');
+        await row.getByRole("button", { name: /Download Gemma 3 1B PT/ }).click();
+        await row.getByText(/Downloading \d+%/).waitFor({ timeout: 5000 });
+        if (!(await p.locator("#dlList li", { hasText: "gemma-3-1b-pt.Q4_K_M.gguf" }).count())) throw new Error("no row in Downloads");
+        await shot(p, "course-downloading");
+        await row.getByText("On this computer").waitFor({ timeout: 30000 });
+        await p.click("#tabLocal");
+        await p.locator("#modelList li", { hasText: "Gemma 3 1B PT" }).getByText("Course model").waitFor({ timeout: 5000 });
+
+        // A download started far down the dialog scrolls its progress bar into view.
+        await p.click("#tabHub");
+        await p.fill("#hubQuery", "qwen");
+        await p.keyboard.press("Enter");
+        await p.locator(".hit").first().click({ timeout: 10000 });
+        await p.locator(".files tbody tr").first().waitFor({ timeout: 10000 });
+        const body = p.locator("#modelsDlg .dlg-body");
+        await body.evaluate((el) => (el.scrollTop = el.scrollHeight));
+        await p.getByRole("button", { name: /^Download Q8_0/ }).click();
+        const dlRow = p.locator("#dlList li", { hasText: "Qwen_Qwen3-0.6B-Q8_0.gguf" });
+        await dlRow.waitFor({ timeout: 5000 });
+        await p.waitForTimeout(800); // the smooth scroll
+        const inView = await dlRow.evaluate((li) => {
+          const r = li.getBoundingClientRect();
+          const b = li.closest(".dlg-body").getBoundingClientRect();
+          return r.top >= b.top && r.bottom <= b.bottom;
+        });
+        if (!inView) throw new Error("the new download's progress bar is scrolled out of view");
+        await shot(p, "download-revealed");
+      } finally {
+        await p.close();
+      }
+    });
+
+  if (!CDP)
+    await step("course models: all three in a row, while the others download (mock core)", async () => {
+      const ui = new URL("../../desktop/ui/index.html?mock&scenario=empty", import.meta.url).href;
+      const p = await browser.newPage({ viewport: { width: W, height: H } });
+      try {
+        await p.goto(ui);
+        await p.getByText("Download the course models").click();
+        const btn = (id) => p.locator(`.course-row[data-course="${id}"] button`, { hasText: "Download" });
+        // While the internet check runs, nothing can start a download that would only wait.
+        if (await btn("qwen3-0.6b").isEnabled()) throw new Error("Download enabled before the internet check answered");
+        await p.waitForFunction(() => !document.querySelector('.course-row[data-course="qwen3-0.6b"] button').disabled, null, { timeout: 5000 });
+        // A running download must not rebuild the other rows under the pointer.
+        await btn("gemma-3-1b-it").click();
+        const qwen = await btn("qwen3-0.6b").elementHandle();
+        await p.waitForTimeout(800); // three download ticks
+        if (!(await qwen.evaluate((el) => el.isConnected))) throw new Error("the Qwen3 row was rebuilt during the Gemma download");
+        await qwen.click();
+        await btn("gemma-3-1b-pt").click();
+        for (const f of ["gemma-3-1b-it-Q4_K_M.gguf", "Qwen_Qwen3-0.6B-Q4_K_M.gguf", "gemma-3-1b-pt.Q4_K_M.gguf"])
+          await p.locator("#dlList li", { hasText: f }).waitFor({ timeout: 5000 });
+        await shot(p, "course-three-downloads");
+        // The Hugging Face file table is not rebuilt under the pointer either.
+        await p.fill("#hubQuery", "qwen");
+        await p.keyboard.press("Enter");
+        await p.locator(".hit").first().click({ timeout: 10000 });
+        const q8 = await p.getByRole("button", { name: /^Download Q8_0/ }).elementHandle({ timeout: 10000 });
+        await p.waitForTimeout(800); // three download ticks
+        if (!(await q8.evaluate((el) => el.isConnected))) throw new Error("the file table was rebuilt during a download");
+      } finally {
+        await p.close();
+      }
+    });
+
+  if (!CDP)
+    await step("course models: every row says what is wrong and offers a way out (mock core)", async () => {
+      const ui = new URL("../../desktop/ui/index.html?mock&scenario=coursestates", import.meta.url).href;
+      const p = await browser.newPage({ viewport: { width: W, height: H } });
+      try {
+        await p.goto(ui);
+        await p.click("#openModels");
+        // The local list: honest tags, never "Included with Trurl".
+        await p.locator("#modelList li", { hasText: "Gemma 3 4B Instruct" }).getByText("Checked by Trurl").waitFor({ timeout: 5000 });
+        if (await p.getByText("Included with Trurl").count()) throw new Error("Included with Trurl is still shown");
+        await p.click("#tabHub");
+        const row = (id) => p.locator(`.course-row[data-course="${id}"]`);
+        await row("qwen3-0.6b").waitFor({ timeout: 5000 });
+        // Try again waits for the connection check, like Download.
+        if (await row("gemma-3-1b-pt").getByRole("button", { name: /Try downloading/ }).isEnabled()) throw new Error("Try again enabled before the internet check answered");
+        await p.locator("#hubQuery").waitFor({ timeout: 5000 });
+        await row("gemma-3-1b-it").getByText("Damaged file").waitFor();
+        await row("gemma-3-1b-it").getByRole("button", { name: /Delete the damaged Gemma 3 1B Instruct/ }).waitFor();
+        await row("gemma-3-1b-pt").getByText("Download failed").waitFor();
+        await row("gemma-3-1b-pt").getByText("The download stopped.").waitFor();
+        await row("qwen3-0.6b").getByText("Another file has this name").waitFor();
+        if (await row("qwen3-0.6b").getByRole("button").count()) throw new Error("a look-alike row offers a button");
+        await shot(p, "course-states");
+        // Try again restarts the failed download.
+        await row("gemma-3-1b-pt").getByRole("button", { name: /Try downloading Gemma 3 1B PT again/ }).click();
+        await row("gemma-3-1b-pt").getByText(/Downloading \d+%|Waiting to retry/).waitFor({ timeout: 5000 });
+        // Delete the damaged file: the row offers Download again.
+        await row("gemma-3-1b-it").getByRole("button", { name: /Delete the damaged/ }).click();
+        await p.locator("#confirmOk").click();
+        await row("gemma-3-1b-it").getByRole("button", { name: /Download Gemma 3 1B Instruct/ }).waitFor({ timeout: 5000 });
+      } finally {
+        await p.close();
+      }
+    });
+
   await step("Hugging Face: search, details, download, verify, install", async () => {
     await openModels("hub");
     await page.locator("#hubQuery").waitFor({ timeout: 30000 });
@@ -344,6 +471,10 @@ if (SUITE === "offline") {
   await step("Hugging Face says to connect, everything else works", async () => {
     await openModels("hub");
     await page.getByText("Connect to the internet to browse Hugging Face").waitFor({ timeout: 30000 });
+    // The course list stays, with what is here; the missing one says how to get it.
+    await page.locator(".course-row").nth(2).waitFor({ timeout: 5000 });
+    if (await page.getByRole("button", { name: /Download Gemma 3 1B PT/ }).isEnabled()) throw new Error("download enabled offline");
+    await page.getByText("Connect to the internet to download them, or import them from the USB stick").waitFor({ timeout: 5000 });
     await shot(page, "hf-offline");
     await closeDialogs();
     await ask("Say hello.");

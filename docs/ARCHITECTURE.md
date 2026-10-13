@@ -346,7 +346,7 @@ use (`examples/verify_update.rs`).
 
 **Why a folder.** NSIS installers cannot exceed 2 GB, and Gemma 3 4B alone is 2.49 GB,
 so the models cannot live inside the `.exe`. They should not anyway: the same
-installer is what the updater downloads, and learners must not download 3.8 GB of
+installer is what the updater downloads, and learners must not download 4.6 GB of
 models for an update.
 
 - **Update installer**, `Trurl_<v>_x64-setup.exe` (15 MB): installs per user, no

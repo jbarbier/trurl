@@ -15,7 +15,7 @@ Python install, `python3` opens the Microsoft Store.)
 | CMake | 3.31.6 (3.14 to 3.31 works) | same, plus `ninja` (optional, faster) |
 | Python | 3.10 or newer | same |
 | Node.js | 22 (the Tauri CLI, from `apps/desktop/package-lock.json`) | 18 or newer, only for the UI end-to-end tests |
-| Disk | about 10 GB: build folders, plus 3.8 GB of models | about 8 GB: build folders, plus 3.8 GB of models |
+| Disk | about 10 GB: build folders, plus 4.6 GB of models | about 8 GB: build folders, plus 4.6 GB of models |
 
 ## 1. Build llama-server (once per llama.cpp version)
 
@@ -59,8 +59,8 @@ python3 scripts/build_llama.py
 python3 scripts/fetch_models.py --dest ~/.cache/trurl/models
 ```
 
-All three pinned models, 3.8 GB. Add `--only gemma-3-1b-it,qwen3-0.6b` for the two
-small ones (1.3 GB). Downloads resume, and every file is checked against its SHA-256
+All four pinned models, 4.6 GB. Add `--only gemma-3-1b-it,qwen3-0.6b` for the two
+the tests use (1.3 GB). Downloads resume, and every file is checked against its SHA-256
 in `pins.json`.
 
 ## 3a. Desktop app (Windows)

@@ -567,6 +567,11 @@ input[type="range"]::-moz-range-thumb {
 .dl-nums .pct { color: var(--ink); font-weight: 600; }
 
 /* Hugging Face */
+.course { display: flex; flex-direction: column; gap: 10px; padding-bottom: 18px; border-bottom: var(--bw) solid var(--hair); }
+.course .course-note { color: var(--ink2); }
+.course .row { flex-wrap: wrap; }
+.course .row-main { min-width: 240px; }
+.course .row-acts .btn .ico { margin-right: 6px; }
 .search { display: flex; gap: 10px; align-items: flex-start; }
 .search input { min-height: 46px; }
 .search .btn { margin-bottom: var(--o2); }

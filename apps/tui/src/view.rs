@@ -272,6 +272,14 @@ fn draw_footer(f: &mut Frame, ui: &Ui, area: Rect) {
                 ("Esc", "back", true),
             ],
             Screen::Hub => match ui.hub_focus {
+                HubFocus::Course if ui.hub_view == HubView::Search => {
+                    let mut k = vec![("↑↓", "choose", true)];
+                    if let Some(what) = ui.course_enter() {
+                        k.push(("Enter", what, true));
+                    }
+                    k.extend([("Tab", "search", true), ("Esc", "back", true)]);
+                    k
+                }
                 HubFocus::Downloads => vec![
                     ("P", "pause or resume", true),
                     ("X", "cancel", true),
@@ -769,7 +777,7 @@ fn draw_settings(f: &mut Frame, ui: &Ui, area: Rect) {
 fn draw_models(f: &mut Frame, ui: &Ui, area: Rect) {
     let mut l: Vec<Line> = Vec::new();
     if ui.models.is_empty() {
-        l.push(Line::from("No models yet. Press I to import a .gguf file (for example from a USB stick), or F4 to download one."));
+        l.push(Line::from("No models yet. Press I to import a .gguf file (for example from a USB stick), or F4 to download the course models."));
     }
     let loaded = match &ui.engine {
         EngineState::Ready { file, .. } | EngineState::Loading { file, .. } => Some(file.clone()),
@@ -804,11 +812,10 @@ fn draw_models(f: &mut Frame, ui: &Ui, area: Rect) {
             human_size(m.size)
         )));
         s.extend(fit_span(m.fit));
-        if m.bundled {
-            s.push(Span::styled(
-                "  included with Trurl",
-                Style::default().fg(DIM),
-            ));
+        if m.course {
+            s.push(Span::styled("  course model", Style::default().fg(DIM)));
+        } else if m.verified == Some(true) {
+            s.push(Span::styled("  checked by Trurl", Style::default().fg(DIM)));
         }
         if m.broken {
             s.push(Span::styled(
@@ -920,6 +927,79 @@ fn downloads_lines(ui: &Ui, l: &mut Vec<Line<'static>>, selectable: bool) {
 
 // ----- Hugging Face ------------------------------------------------------------
 
+/// The course models, one line each, then what the chosen one is for. The
+/// exact pinned files: Enter downloads one, so nobody picks a look-alike.
+fn course_lines(ui: &Ui, online: bool) -> Vec<Line<'static>> {
+    let focused = online && ui.hub_focus == HubFocus::Course;
+    let cur = ui.running_file().map(str::to_string);
+    let mut l = Vec::new();
+    for (i, c) in ui.course_models.iter().enumerate() {
+        let sel = focused && i == ui.course_sel;
+        let st = if sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        let mut s = vec![
+            Span::styled(if sel { "› " } else { "  " }, st),
+            Span::styled(format!("{:<22}", c.name), st),
+            Span::raw(format!("{:>8}  ", human_size(c.size))),
+        ];
+        s.extend(fit_span(c.fit));
+        let (text, color) = match (ui.course_model_here(c), ui.course_download(c)) {
+            (Some(m), _) if m.broken => ("  damaged file".to_string(), Color::Red),
+            (Some(m), _) if cur.as_deref() == Some(m.file.as_str()) => {
+                ("  ◆ in use".to_string(), Color::Green)
+            }
+            (Some(_), _) if sel => (
+                "  on this computer, Enter uses it".to_string(),
+                Color::Green,
+            ),
+            (Some(_), _) => ("  on this computer".to_string(), Color::Green),
+            (None, _) if ui.course_clash(c) => {
+                ("  another file has this name".to_string(), Color::Yellow)
+            }
+            (None, Some(d)) if d.status == trurl_core::downloads::DownloadStatus::Failed => (
+                format!(
+                    "  failed: {}{}",
+                    d.error.as_ref().map(|e| e.title.as_str()).unwrap_or(""),
+                    if sel { " Enter tries again." } else { "" }
+                ),
+                Color::Red,
+            ),
+            (None, Some(d)) => {
+                let pct = d.done * 100 / d.size.max(1);
+                use trurl_core::downloads::DownloadStatus as S;
+                match d.status {
+                    S::Paused => (format!("  paused at {pct}%"), Color::Yellow),
+                    S::Retrying => (format!("  waiting to retry, {pct}%"), Color::Yellow),
+                    S::Verifying => ("  checking the file".to_string(), ACCENT),
+                    _ => (format!("  downloading {pct}%"), ACCENT),
+                }
+            }
+            (None, None) if sel => ("  Enter downloads it".to_string(), ACCENT),
+            (None, None) => ("  not downloaded yet".to_string(), DIM),
+        };
+        s.push(Span::styled(text, Style::default().fg(color)));
+        l.push(Line::from(s));
+    }
+    let note = ui
+        .course_models
+        .get(if focused { ui.course_sel } else { usize::MAX })
+        .map(|c| format!("{}: {}", c.name, c.note));
+    let missing = ui
+        .course_models
+        .iter()
+        .any(|c| ui.course_model_here(c).is_none());
+    let hint = match (note, online, missing) {
+        (Some(n), _, _) => n,
+        (None, false, true) => "Connect to the internet to download them, or press I in Models (F2) to import them from the USB stick.".into(),
+        (None, _, _) => "The exact files the course uses, checked by Trurl. Download these rather than searching.".into(),
+    };
+    l.push(Line::from(Span::styled(hint, Style::default().fg(DIM))));
+    l
+}
+
 fn draw_hub(f: &mut Frame, ui: &Ui, area: Rect) {
     match ui.hub_view {
         HubView::Checking => {
@@ -929,7 +1009,16 @@ fn draw_hub(f: &mut Frame, ui: &Ui, area: Rect) {
             );
         }
         HubView::Offline => {
-            let l = vec![
+            let mut l = Vec::new();
+            if !ui.course_models.is_empty() {
+                l.push(Line::from(Span::styled(
+                    "For the course",
+                    Style::default().add_modifier(Modifier::BOLD),
+                )));
+                l.extend(course_lines(ui, false));
+                l.push(Line::from(""));
+            }
+            l.extend(vec![
                 Line::from(Span::styled(
                     "Connect to the internet to browse Hugging Face",
                     Style::default().add_modifier(Modifier::BOLD),
@@ -940,17 +1029,45 @@ fn draw_hub(f: &mut Frame, ui: &Ui, area: Rect) {
                     "Press Enter to check again.",
                     Style::default().fg(DIM),
                 )),
-            ];
-            let mut l = l;
+            ]);
             l.push(Line::from(""));
             downloads_lines(ui, &mut l, true);
-            f.render_widget(Paragraph::new(l).block(block("Hugging Face")), area);
+            f.render_widget(
+                Paragraph::new(l)
+                    .block(block("Hugging Face"))
+                    .wrap(Wrap { trim: false }),
+                area,
+            );
         }
         HubView::Search => {
+            let course = course_lines(ui, true);
+            // The note under the list can wrap once on a narrow terminal.
+            let course_h = if ui.course_models.is_empty() {
+                0
+            } else {
+                course.len() as u16 + 4
+            };
+            let all = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(course_h), Constraint::Min(6)])
+                .split(area);
+            if course_h > 0 {
+                let b = block("For the course").border_style(Style::default().fg(
+                    if ui.hub_focus == HubFocus::Course {
+                        ACCENT
+                    } else {
+                        DIM
+                    },
+                ));
+                f.render_widget(
+                    Paragraph::new(course).block(b).wrap(Wrap { trim: false }),
+                    all[0],
+                );
+            }
             let rows = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Length(3), Constraint::Min(3)])
-                .split(area);
+                .split(all[1]);
             let focused = ui.hub_focus == HubFocus::Input;
             let b = block("Search Hugging Face for GGUF models")
                 .border_style(Style::default().fg(if focused { ACCENT } else { DIM }));

@@ -3,6 +3,15 @@
 Each section is also the release notes the update prompt shows, so write it
 for learners and teachers: short, plain, what changes for them.
 
+## Unreleased
+
+- The course models are one click away: the Hugging Face screen starts with
+  For the course (Gemma 3 1B, Gemma 3 1B PT, Qwen3 0.6B), each the exact file the
+  course uses. No searching, no look-alikes.
+- A download you start scrolls into view, so you see its progress bar.
+- Models no longer say "Included with Trurl" when you downloaded them: course models
+  say "Course model", other checked files "Checked by Trurl".
+
 ## 0.1.0
 
 First version of Trurl.
