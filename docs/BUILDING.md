@@ -109,6 +109,9 @@ docker run --rm -it -v "$PWD":/src -w /src debian:bullseye bash
 # then, inside: the steps of the "linux" job in .github/workflows/release.yml
 ```
 
+Start with that job's first step. Debian 11 reached end of life in August 2026,
+so its packages are now on archive.debian.org only, and `apt-get` fails without it.
+
 ## 3c. The desktop UI in a browser (any OS, for UI work)
 
 ```
