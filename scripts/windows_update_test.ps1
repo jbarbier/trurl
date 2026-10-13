@@ -38,7 +38,8 @@ Push-Location apps/desktop
 & $tauri build --config $conf -- --locked
 Pop-Location
 $setupN = Join-Path $work "N-setup.exe"
-Copy-Item (Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1).FullName $setupN
+# By exact name: the folder keeps installers of earlier builds.
+Copy-Item "target/release/bundle/nsis/Trurl_${vN}_x64-setup.exe" $setupN
 
 Step "Install $vN and add a model"
 Start-Process $setupN -ArgumentList "/S" -Wait
@@ -55,7 +56,7 @@ Push-Location apps/desktop
 & $tauri build --config $conf -- --locked
 Pop-Location
 $setupNext = Join-Path $srv "Trurl_${vNext}_x64-setup.exe"
-Copy-Item (Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1).FullName $setupNext
+Copy-Item "target/release/bundle/nsis/Trurl_${vNext}_x64-setup.exe" $setupNext
 & $tauri signer sign -f $key -p test --app-version $vNext $setupNext
 python scripts/release_notes.py $vNext | Set-Content -Encoding utf8 (Join-Path $work "notes.md")
 python scripts/make_manifest.py --version $vNext --notes-file (Join-Path $work "notes.md") --windows $setupNext --base-url "http://127.0.0.1:8899" --out (Join-Path $srv "latest.json")

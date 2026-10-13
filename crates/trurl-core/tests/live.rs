@@ -545,8 +545,14 @@ async fn an_update_never_cuts_off_an_answer() {
     h.app.release_engine().await.unwrap();
     let held = h.app.send("Hello?").unwrap_err();
     assert_eq!(held.title, "Trurl is installing an update.");
-    // The install failed: the model comes back and chatting works again.
+    // Ctrl+R / "Try again" during the install must not bring the model back.
     h.app.reload();
+    assert_eq!(
+        h.app.send("Hello?").unwrap_err().title,
+        "Trurl is installing an update."
+    );
+    // The install failed: the model comes back and chatting works again.
+    h.app.update_failed_reload();
     h.ready(GEMMA).await;
     let t = h.ask("Say hello.").await;
     assert_eq!(t.status, TurnStatus::Done);

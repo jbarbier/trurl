@@ -113,9 +113,6 @@ struct Entry {
     /// rewritten only when one of these changes, not on every progress tick.
     saved: Option<(DownloadStatus, u64, bool, bool)>,
     cancel: Option<CancellationToken>,
-    /// Held by the task that downloads this entry, so a quick Pause then Resume
-    /// can never have two tasks writing the same file.
-    run_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Entry {
@@ -124,7 +121,6 @@ impl Entry {
             info,
             saved: None,
             cancel: None,
-            run_lock: Arc::default(),
         }
     }
 }
@@ -141,6 +137,13 @@ struct Inner {
     http: reqwest::Client,
     token: Mutex<String>,
     entries: Mutex<HashMap<String, Entry>>,
+    /// One per download id, kept even after Cancel: the task that writes a file
+    /// holds it, so Pause then Resume, or Cancel then Download again, can never
+    /// have two tasks writing the same file.
+    run_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Job files are written by the download task and by Pause, Resume and
+    /// closing Trurl: one at a time, or two writers could mix one file.
+    job_io: Mutex<()>,
     notify: Notify,
     on_done: OnDone,
     retry_delays: Vec<Duration>,
@@ -163,6 +166,8 @@ impl Downloads {
                 http,
                 token: Mutex::new(String::new()),
                 entries: Mutex::new(HashMap::new()),
+                run_locks: Mutex::new(HashMap::new()),
+                job_io: Mutex::new(()),
                 notify,
                 on_done,
                 retry_delays: vec![
@@ -243,10 +248,13 @@ impl Downloads {
             }
             map.insert(info.id.clone(), Entry::new(info));
         }
-        // A part file with no job left can never be resumed or seen: free the disk.
+        // A part file with no job file at all can never be resumed or seen: free
+        // the disk. One whose job file exists but cannot be read is left alone:
+        // deleting gigabytes on a guess is worse than keeping them.
         for p in parts {
             let id = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-            if !map.contains_key(id) {
+            let job = self.job_path(id);
+            if !map.contains_key(id) && !job.exists() && !job.with_extension("json.tmp").exists() {
                 let _ = std::fs::remove_file(&p);
             }
         }
@@ -274,6 +282,11 @@ impl Downloads {
         let mut v: Vec<DownloadInfo> = map.values().map(|e| e.info.clone()).collect();
         v.sort_by(|a, b| a.dest_file.cmp(&b.dest_file));
         v
+    }
+
+    fn write_job(&self, info: &DownloadInfo) {
+        let _one = self.inner.job_io.lock().unwrap_or_else(|p| p.into_inner());
+        write_job(&self.job_path(&info.id), info);
     }
 
     fn part_path(&self, id: &str) -> PathBuf {
@@ -306,7 +319,7 @@ impl Downloads {
             }
         };
         if let Some(info) = to_save {
-            write_job(&self.job_path(id), &info);
+            self.write_job(&info);
         }
     }
 
@@ -328,6 +341,8 @@ impl Downloads {
             let done = std::fs::metadata(self.part_path(&id))
                 .map(|m| m.len())
                 .unwrap_or(0);
+            // Bytes left by an earlier job of this session were never proven synced.
+            let synced = map.get(&id).map_or(0, |e| e.info.synced.min(done));
             let info = DownloadInfo {
                 id: id.clone(),
                 repo: req.repo,
@@ -341,7 +356,7 @@ impl Downloads {
                 error: None,
                 rate: 0,
                 user_paused: false,
-                synced: done,
+                synced,
             };
             map.insert(id.clone(), Entry::new(info));
         }
@@ -379,7 +394,7 @@ impl Downloads {
             self.finish_with_error(id, UserError::disk_full());
             return Err(UserError::disk_full());
         }
-        write_job(&self.job_path(id), &info);
+        self.write_job(&info);
         self.emit();
         let me = self.clone();
         let id = id.to_string();
@@ -461,16 +476,14 @@ impl Downloads {
     }
 
     async fn run(&self, id: String, cancel: CancellationToken) {
-        let Some(lock) = self
+        let lock = self
             .inner
-            .entries
+            .run_locks
             .lock()
             .unwrap()
-            .get(&id)
-            .map(|e| e.run_lock.clone())
-        else {
-            return;
-        };
+            .entry(id.clone())
+            .or_default()
+            .clone();
         // Wait for a previous task on this download (paused a moment ago) to let go of the file.
         let _running = lock.lock().await;
         if cancel.is_cancelled() {
@@ -492,6 +505,7 @@ impl Downloads {
                 .unwrap_or(0);
             if after > before {
                 attempt = 0;
+                blocked = 0;
             }
             match r {
                 Ok(()) => break,
@@ -611,7 +625,7 @@ impl Downloads {
             r = rb.send() => r,
             _ = cancel.cancelled() => return Ok(()),
         };
-        let resp = resp.map_err(|e| UserError::download_failed().with_detail(e.to_string()))?;
+        let resp = resp.map_err(request_error)?;
         let status = resp.status().as_u16();
         // Nothing on disk is touched until the reply is known to be the right file:
         // a school proxy that ignores Range, or a web filter page sent with status
@@ -738,12 +752,17 @@ impl Downloads {
                         i.done = done.max(have);
                         i.synced = synced;
                     });
-                    return Err(UserError::download_failed().with_detail(e.to_string()));
+                    // A server that ignores Range on a link that drops before it gets
+                    // back to where we were would loop for ever: say so instead.
+                    if start == 0 && have > 0 && done < have {
+                        return Err(restarted_short(done, have));
+                    }
+                    return Err(UserError::download_failed().with_detail(crate::errors::chain(&e)));
                 }
                 None => break,
             }
         }
-        if done < have && (info.size == 0 || done >= info.size) {
+        if done < have && info.size > 0 && done >= info.size {
             // A whole file sent over a longer stale part: drop the stale tail.
             f.set_len(done).map_err(save_error)?;
         }
@@ -759,11 +778,41 @@ impl Downloads {
             }
         });
         if info.size > 0 && done < info.size {
+            if start == 0 && have > 0 && done < have {
+                return Err(restarted_short(done, have));
+            }
             return Err(UserError::download_failed()
                 .with_detail(format!("connection closed at {done} of {}", info.size)));
         }
         Ok(())
     }
+}
+
+/// A request that never got a reply. No internet: keep trying. A secure
+/// connection that fails (a wrong clock, an intercepting network): say what to
+/// check, no retry can fix it. A proxy that wants a login: a few tries, then say
+/// a network may block downloads. Anything else: a drop, keep trying.
+fn request_error(e: reqwest::Error) -> UserError {
+    let detail = crate::errors::chain(&e);
+    match crate::net::classify(&e) {
+        crate::net::NetFailure::Offline => UserError::download_failed().with_detail(detail),
+        crate::net::NetFailure::Tls => UserError::hub_tls().with_detail(detail),
+        // A proxy that refuses to pass the request on (it wants a login): no
+        // retry fixes that. Every other failure here is a dropped connection.
+        crate::net::NetFailure::Other if crate::net::is_proxy_refusal(&e) => {
+            UserError::download_blocked().with_detail(detail)
+        }
+        crate::net::NetFailure::Other => UserError::download_failed().with_detail(detail),
+    }
+}
+
+/// The server ignored Range, sent the file from byte 0, and the connection
+/// dropped before it got back to where the download was: on a link that drops
+/// this would never finish.
+fn restarted_short(done: u64, have: u64) -> UserError {
+    UserError::download_blocked().with_detail(format!(
+        "the server restarts from the beginning and the connection dropped at {done} of the {have} bytes we had"
+    ))
 }
 
 fn save_error(e: std::io::Error) -> UserError {
@@ -787,9 +836,16 @@ fn write_job(path: &Path, info: &DownloadInfo) {
 
 /// A job file from disk. Files from before `synced` existed trust the part file.
 fn read_job(path: &Path) -> Option<DownloadInfo> {
-    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
     let had_synced = v.get("synced").is_some();
-    let mut info: DownloadInfo = serde_json::from_value(v).ok()?;
+    let mut info: DownloadInfo = match serde_json::from_value(v.clone()) {
+        Ok(i) => i,
+        // An error this version does not know (written by a newer Trurl): drop it.
+        Err(_) => {
+            v.as_object_mut()?.remove("error");
+            serde_json::from_value(v).ok()?
+        }
+    };
     if !had_synced {
         info.synced = u64::MAX;
     }

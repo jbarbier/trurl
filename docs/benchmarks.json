@@ -1,0 +1,127 @@
+{
+  "machine": {
+    "cpu": "DO-Premium-AMD",
+    "label": "A small cloud computer (2 AMD EPYC cores with AVX2)",
+    "threads": 2,
+    "ram_gb": 7.8
+  },
+  "model": "gemma-3-1b-it-Q4_K_M.gguf",
+  "max_tokens": 128,
+  "rounds": 5,
+  "results": [
+    {
+      "app": "Trurl",
+      "disk_mb": 54,
+      "load_s": 1.5,
+      "first_word_s": 0.75,
+      "tokens_per_s": 9.8,
+      "tokens_per_s_range": [
+        8.8,
+        10.1
+      ],
+      "tokens_per_s_all": [
+        7.93,
+        7.29,
+        8.59,
+        9.11,
+        9.08,
+        10.43,
+        10.04,
+        10.25,
+        10.35,
+        10.0,
+        10.26,
+        9.98,
+        9.81,
+        9.28,
+        7.88
+      ],
+      "ram_idle_mb": 980,
+      "ram_peak_mb": 980,
+      "cpu_idle_pct": 0.0
+    },
+    {
+      "app": "Ollama",
+      "disk_mb": 2253,
+      "load_s": 6.8,
+      "first_word_s": 0.74,
+      "tokens_per_s": 10.8,
+      "tokens_per_s_range": [
+        10.1,
+        11.2
+      ],
+      "tokens_per_s_all": [
+        8.61,
+        9.7,
+        9.82,
+        11.23,
+        10.82,
+        10.85,
+        10.92,
+        11.84,
+        12.14,
+        11.23,
+        12.09,
+        10.29,
+        10.85,
+        11.15,
+        8.66
+      ],
+      "ram_idle_mb": 953,
+      "ram_peak_mb": 953,
+      "cpu_idle_pct": 0.0
+    },
+    {
+      "app": "llamafile",
+      "disk_mb": 368,
+      "load_s": 2.0,
+      "first_word_s": 0.71,
+      "tokens_per_s": 7.0,
+      "tokens_per_s_range": [
+        6.4,
+        7.2
+      ],
+      "tokens_per_s_all": [
+        7.14,
+        6.18,
+        6.69,
+        6.75,
+        7.08,
+        7.5,
+        7.45,
+        7.55,
+        7.16,
+        7.05,
+        7.33,
+        3.99,
+        6.0,
+        6.66,
+        5.88
+      ],
+      "ram_idle_mb": 936,
+      "ram_peak_mb": 936,
+      "cpu_idle_pct": 0.0
+    }
+  ],
+  "low_ram": {
+    "Trurl": {
+      "1.5G": "answers in 1 s",
+      "1G": "answers in 1 s",
+      "750M": "answers in 12 s",
+      "500M": "answers in 10 s"
+    },
+    "Ollama": {
+      "1.5G": "answers in 1 s",
+      "1G": "answers in 1 s",
+      "750M": "does not start",
+      "500M": "does not start"
+    },
+    "llamafile": {
+      "1.5G": "answers in 1 s",
+      "1G": "answers in 1 s",
+      "750M": "answers in 5 s",
+      "500M": "answers in 9 s"
+    }
+  },
+  "date": "2026-10-13"
+}

@@ -36,6 +36,9 @@ enum Mode {
     /// the second sends the whole file again (200) and drops at 300 000, then
     /// the whole file again.
     IgnoreRangeAndDrop,
+    /// A proxy that ignores Range on a link that drops: the first request drops
+    /// at 800 000 bytes, every later one sends the whole file and drops at 300 000.
+    RestartsFromZeroAndDrops,
 }
 
 struct Srv {
@@ -87,7 +90,12 @@ async fn serve(State(s): State<Arc<Srv>>, headers: HeaderMap) -> Response {
     } else {
         StatusCode::OK
     };
-    if s.mode == Mode::IgnoreRange || (s.mode == Mode::IgnoreRangeAndDrop && n >= 1) {
+    if s.mode == Mode::IgnoreRange
+        || (matches!(
+            s.mode,
+            Mode::IgnoreRangeAndDrop | Mode::RestartsFromZeroAndDrops
+        ) && n >= 1)
+    {
         start = 0;
         status = StatusCode::OK;
     }
@@ -116,19 +124,26 @@ async fn serve(State(s): State<Arc<Srv>>, headers: HeaderMap) -> Response {
     let drop_rule = match (s.mode, n) {
         (Mode::IgnoreRangeAndDrop, 0) => Some((800_000, 1)),
         (Mode::IgnoreRangeAndDrop, 1) => Some((300_000, 2)),
+        (Mode::RestartsFromZeroAndDrops, 0) => Some((800_000, 1)),
+        (Mode::RestartsFromZeroAndDrops, _) => Some((300_000, usize::MAX)),
         _ => drop_rule,
     };
     if let Some((cut, times)) = drop_rule
         && n < times
     {
         let first = Bytes::from(body_bytes[..cut.min(body_bytes.len())].to_vec());
-        let stream = futures_util::stream::iter(vec![
-            Ok::<Bytes, std::io::Error>(first),
-            Err(std::io::Error::new(
-                std::io::ErrorKind::ConnectionReset,
-                "wifi dropped",
-            )),
-        ]);
+        // The bytes go out first, then the "Wi-Fi" drops: an error that is ready
+        // at once could reach the server before the headers did.
+        use futures_util::StreamExt;
+        let stream = futures_util::stream::iter(vec![Ok::<Bytes, std::io::Error>(first)]).chain(
+            futures_util::stream::once(async {
+                tokio::time::sleep(Duration::from_millis(30)).await;
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionReset,
+                    "wifi dropped",
+                ))
+            }),
+        );
         return b.body(Body::from_stream(stream)).unwrap();
     }
     b.body(Body::from(body_bytes)).unwrap()
@@ -703,4 +718,68 @@ async fn an_old_job_file_without_synced_keeps_its_bytes() {
     );
     assert_eq!(part_len(&s, &id), have);
     assert_eq!(again.list()[0].done, have);
+}
+
+/// A proxy that always starts again from byte 0, on a link that drops before it
+/// gets back to where the download was, can never finish: after a few tries
+/// Trurl says so, instead of "trying again" for ever.
+#[tokio::test]
+async fn a_proxy_that_always_restarts_from_zero_ends_with_a_plain_message() {
+    let s = setup(Mode::RestartsFromZeroAndDrops).await;
+    let id = s.downloads.start(s.req.clone()).unwrap();
+    let fail = wait_done(&s).await.unwrap_err();
+    assert_eq!(
+        fail.error.as_ref().unwrap().code,
+        trurl_core::ErrorCode::DownloadBlocked
+    );
+    assert!(part_len(&s, &id) >= 800_000, "the bytes are kept");
+}
+
+/// A job file that cannot be read is not a reason to delete gigabytes.
+#[tokio::test]
+async fn a_part_whose_job_file_is_unreadable_is_kept() {
+    let s = setup(Mode::Good).await;
+    let part = s.dl_dir.path().join("0123456789abcdef.part");
+    std::fs::write(&part, vec![1u8; 4096]).unwrap();
+    std::fs::write(s.dl_dir.path().join("0123456789abcdef.json"), [0u8; 64]).unwrap();
+    let _again = Downloads::new(
+        s.dl_dir.path().into(),
+        s.models.path().into(),
+        s.base.clone(),
+        trurl_core::net::client_builder().build().unwrap(),
+        Arc::new(|_| {}),
+        Arc::new(|_| {}),
+    );
+    assert!(part.exists());
+}
+
+/// A job file written by a newer Trurl (an error this version does not know)
+/// still comes back, with its bytes.
+#[tokio::test]
+async fn a_job_file_from_a_newer_trurl_still_loads() {
+    let s = setup(Mode::DropAfter(500_000, 1)).await;
+    let id = s.downloads.start(s.req.clone()).unwrap();
+    for _ in 0..300 {
+        if part_len(&s, &id) >= 500_000 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    s.downloads.pause_all();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let job = s.dl_dir.path().join(format!("{id}.json"));
+    let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&job).unwrap()).unwrap();
+    v["status"] = "failed".into();
+    v["error"] = serde_json::json!({"code": "something_new", "title": "New.", "hint": "From a newer Trurl."});
+    std::fs::write(&job, serde_json::to_vec(&v).unwrap()).unwrap();
+    let again = Downloads::new(
+        s.dl_dir.path().into(),
+        s.models.path().into(),
+        "http://127.0.0.1:9".into(),
+        trurl_core::net::client_builder().build().unwrap(),
+        Arc::new(|_| {}),
+        Arc::new(|_| {}),
+    );
+    assert_eq!(again.list().len(), 1);
+    assert!(part_len(&s, &id) >= 500_000);
 }

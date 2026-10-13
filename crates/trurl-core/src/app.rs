@@ -72,6 +72,8 @@ struct Endpoint {
 
 struct Inner {
     paths: Paths,
+    /// Settings writes, one at a time (see `save_settings`).
+    settings_io: Mutex<()>,
     hw: Hardware,
     llama_root: Option<PathBuf>,
     hf_base: String,
@@ -134,6 +136,7 @@ impl App {
                     verified,
                     load_epoch: 0,
                 }),
+                settings_io: Mutex::new(()),
                 server: tokio::sync::Mutex::new(None),
                 endpoint: Mutex::new(None),
                 gen_cancel: Mutex::new(None),
@@ -236,7 +239,17 @@ impl App {
     }
 
     fn save_settings(&self, s: &Settings) {
-        let _ = s.save(&self.inner.paths.settings());
+        {
+            // Write what is current when the write happens, one write at a time:
+            // a slower thread can never put an older snapshot back on disk.
+            let _one = self
+                .inner
+                .settings_io
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            let current = self.inner.state.lock().unwrap().settings.clone();
+            let _ = current.save(&self.inner.paths.settings());
+        }
         self.emit(Event::Settings {
             settings: Self::public_settings(s),
         });
@@ -499,8 +512,13 @@ impl App {
     }
 
     /// Reload the current model (after a crash, or from the error banner's "Try again").
-    pub fn reload(&self) {
+    /// The update could not be installed: lift the hold and bring the model back.
+    pub fn update_failed_reload(&self) {
         self.inner.state.lock().unwrap().held = false;
+        self.reload();
+    }
+
+    pub fn reload(&self) {
         let file = self.inner.state.lock().unwrap().settings.model.clone();
         if let Some(f) = file {
             self.load(f);
@@ -511,7 +529,7 @@ impl App {
     /// update). Refuses while an answer is being written, and from then on no
     /// new answer can start, in one step: there is no moment between "is it
     /// busy?" and "stop it" where a learner's answer could be cut off. If the
-    /// install fails, `reload()` brings the model back and lifts the hold.
+    /// install fails, `update_failed_reload()` lifts the hold and brings the model back.
     pub async fn release_engine(&self) -> Result<(), UserError> {
         {
             let mut st = self.inner.state.lock().unwrap();
@@ -539,7 +557,7 @@ impl App {
     /// Stop whatever runs, start llama-server with `file`, report progress.
     pub fn load(&self, file: String) {
         // An update is installing: the model server must stay down (its files are
-        // being replaced). `reload()` lifts the hold if the install fails.
+        // being replaced). `update_failed_reload()` lifts the hold if the install fails.
         if self.inner.state.lock().unwrap().held {
             return;
         }
@@ -553,6 +571,12 @@ impl App {
             .replace(cancel.clone())
         {
             old.cancel();
+        }
+        // An update may have taken the engine between the check above and now:
+        // its unload cancels the token it found, so check again with ours in place.
+        if self.inner.state.lock().unwrap().held {
+            cancel.cancel();
+            return;
         }
         let name = self.model_name(&file);
         let (epoch, cfg_base) = {

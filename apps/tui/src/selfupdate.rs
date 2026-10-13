@@ -104,12 +104,12 @@ pub async fn install(
     }
     if let Err(e) = std::fs::rename(&dir, &old) {
         let _ = std::fs::remove_dir_all(&staging);
-        core.reload();
+        core.update_failed_reload();
         return Err(UserError::update_failed().with_detail(e.to_string()));
     }
     if let Err(e) = std::fs::rename(&staging, &dir) {
         let _ = std::fs::rename(&old, &dir);
-        core.reload();
+        core.update_failed_reload();
         return Err(UserError::update_failed().with_detail(e.to_string()));
     }
     let _ = std::fs::remove_dir_all(&old);

@@ -153,7 +153,7 @@ async fn install_update(app: AppHandle, d: Arc<Desktop>) -> Result<(), UserError
             return Err(e);
         }
         if let Err(e) = update.install(bytes) {
-            d.core.reload();
+            d.core.update_failed_reload();
             return Err(UserError::update_failed().with_detail(e.to_string()));
         }
         // Not reached on Windows (the installer exits the app); harmless elsewhere.

@@ -63,13 +63,14 @@ jobs:
         run: |
           npx --no -- tauri build -- --locked
           New-Item -ItemType Directory -Force ../../dist | Out-Null
-          Copy-Item ../../target/release/bundle/nsis/*-setup.exe ../../dist/
+          $v = (Get-Content ../../pins.json | ConvertFrom-Json).app.version
+          Copy-Item "../../target/release/bundle/nsis/Trurl_${v}_x64-setup.exe" ../../dist/
       - name: USB installer (embeds the WebView2 offline installer)
         working-directory: apps/desktop
         run: |
           npx --no -- tauri build --config src-tauri/tauri.usb.conf.json -- --locked
-          $exe = Get-ChildItem ../../target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
-          Copy-Item $exe.FullName ("../../dist/" + $exe.Name.Replace("-setup.exe", "-offline-setup.exe"))
+          $v = (Get-Content ../../pins.json | ConvertFrom-Json).app.version
+          Copy-Item "../../target/release/bundle/nsis/Trurl_${v}_x64-setup.exe" "../../dist/Trurl_${v}_x64-offline-setup.exe"
       - name: Models for the smoke test
         run: python scripts/fetch_models.py --dest $env:TRURL_TEST_MODELS --only gemma-3-1b-it,qwen3-0.6b
       - name: Smoke-test the USB installer exactly as a teacher uses it

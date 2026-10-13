@@ -60,8 +60,16 @@ pub fn classify(e: &(dyn std::error::Error + 'static)) -> NetFailure {
     use std::io::ErrorKind as K;
     let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(e);
     let mut offline = false;
+    let mut depth = 0;
     while let Some(err) = cur {
-        let text = err.to_string().to_ascii_lowercase();
+        // The outermost message carries the URL (a search for "ssl" must not
+        // look like a TLS failure): read words only from the causes.
+        let text = if depth == 0 {
+            String::new()
+        } else {
+            err.to_string().to_ascii_lowercase()
+        };
+        depth += 1;
         if [
             "certificate",
             "tls",
@@ -103,6 +111,27 @@ pub fn classify(e: &(dyn std::error::Error + 'static)) -> NetFailure {
     } else {
         NetFailure::Other
     }
+}
+
+/// A proxy that would not pass the request on (407, a refused tunnel).
+pub fn is_proxy_refusal(e: &(dyn std::error::Error + 'static)) -> bool {
+    let mut top = e.to_string().to_ascii_lowercase();
+    // The outer message carries the URL: only its fixed words count.
+    if let Some(i) = top.find("for url (") {
+        top.truncate(i);
+    }
+    let hit = |t: &str| t.contains("unsuccessful tunnel") || t.contains("proxy authentication");
+    if hit(&top) {
+        return true;
+    }
+    let mut cur = e.source();
+    while let Some(c) = cur {
+        if hit(&c.to_string().to_ascii_lowercase()) {
+            return true;
+        }
+        cur = c.source();
+    }
+    false
 }
 
 /// True when the request never reached a server: no network, no DNS, refused.
@@ -155,6 +184,24 @@ mod tests {
             None,
         );
         assert_eq!(classify(&proxy), NetFailure::Other);
+        assert!(is_proxy_refusal(&proxy));
+        let dropped = Wrap(
+            "error sending request for url (http://x/proxy-tunnel.gguf)",
+            Some(Box::new(Wrap(
+                "connection closed before message completed",
+                None,
+            ))),
+        );
+        assert!(!is_proxy_refusal(&dropped), "a drop is not a proxy refusal");
+        // Offline, searching for "ssl": the URL in the outer message is not a TLS failure.
+        let search = Wrap(
+            "error sending request for url (https://huggingface.co/api/models?search=ssl-tls-certificate)",
+            Some(Box::new(Wrap(
+                "dns error: failed to lookup address information",
+                None,
+            ))),
+        );
+        assert_eq!(classify(&search), NetFailure::Offline);
     }
 
     #[tokio::test]

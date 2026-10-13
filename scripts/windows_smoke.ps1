@@ -24,7 +24,9 @@ function Shot($name) {
 }
 
 Step "USB-style folder: installer + models/"
-$setup = Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+# By exact name: target/ is cached between CI runs and may hold older installers.
+$version = (Get-Content pins.json | ConvertFrom-Json).app.version
+$setup = Get-Item "target/release/bundle/nsis/Trurl_${version}_x64-setup.exe"
 $usb = Join-Path $env:RUNNER_TEMP "TrurlUSB"
 New-Item -ItemType Directory -Force (Join-Path $usb "models") | Out-Null
 Copy-Item $setup.FullName $usb
@@ -74,6 +76,25 @@ try {
   if ($LASTEXITCODE -ne 0) { Pop-Location; throw "UI smoke test failed" }
   Pop-Location
   Shot "02-after-chat"
+
+  Step "Memory of the desktop app after one answer (for docs/BENCHMARKS.md)"
+  $all = Get-CimInstance Win32_Process
+  $tree = @($proc.Id)
+  do {
+    $more = $all | Where-Object { $tree -contains $_.ParentProcessId -and $tree -notcontains $_.ProcessId } | ForEach-Object { $_.ProcessId }
+    $tree += $more
+  } while ($more)
+  $rows = Get-Process -Id $tree -ErrorAction SilentlyContinue | Group-Object Name | ForEach-Object {
+    [pscustomobject]@{
+      Process = $_.Name
+      Count = $_.Count
+      WorkingSetMB = [math]::Round(($_.Group | Measure-Object WorkingSet64 -Sum).Sum / 1MB)
+      PrivateMB = [math]::Round(($_.Group | Measure-Object PrivateMemorySize64 -Sum).Sum / 1MB)
+    }
+  }
+  $rows | Format-Table -AutoSize | Out-String | Write-Host
+  $total = ($rows | Measure-Object WorkingSetMB -Sum).Sum
+  Write-Host "DESKTOP MEMORY: $total MB working set in all (trurl.exe, WebView2, llama-server with the model mapped)"
 
   Step "Close Trurl: llama-server must stop with it"
   Stop-Process -Id $proc.Id

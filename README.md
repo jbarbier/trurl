@@ -210,17 +210,40 @@ graphics card is needed.
 
 ## Benchmarks
 
-The same model file, on the same computer, in Trurl and in the other free ways to run
-it. Method and raw numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+The same model file, on the same computer, in Trurl and in the two other free ways
+to run it offline. Method and raw numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+
+**What it means on a learner's laptop:**
+
+- **Smallest by far.** Trurl is about 50 MB on disk, 40 times smaller than Ollama:
+  it fits on any old laptop and on the USB stick with its models.
+- **Starts in about 2 seconds,** several times faster than Ollama.
+- **Keeps working when memory runs out.** With only 500 MB of memory left for
+  them, Trurl and llamafile still answer; Ollama refuses to start with less than
+  1 GB. When it is that tight, answers come slowly, but they come.
+- **Same speed class.** All three compute with the same library (ggml). Ollama 0.40
+  runs Gemma 3 with its own engine and streams it a little faster on this computer;
+  llamafile is slower.
+- **Uses nothing while it waits:** 0% CPU between questions.
+- **Memory** is within a few percent for all three: almost all of it is the model.
+  Trurl's own process adds about 35 MB.
 
 <!-- benchmarks:start -->
 | | App on disk | Load time | First word | Speed | RAM, idle | RAM, answering | CPU, idle |
 |---|---|---|---|---|---|---|---|
-| Trurl | **54 MB** | **1.9 s** | 1.1 s | **8.3 tokens/s (7.4 to 8.9)** | 980 MB | 980 MB | **0.0%** |
-| Ollama | 2,253 MB | 9.0 s | 0.79 s | **9.7 tokens/s (8.5 to 10.6)** | 951 MB | 953 MB | **0.0%** |
-| llamafile | 368 MB | 2.5 s | **0.77 s** | 6.3 tokens/s (5.9 to 6.5) | **935 MB** | **936 MB** | **0.0%** |
+| Trurl | **54 MB** | **1.5 s** | 0.75 s | **9.8 tokens/s (8.8 to 10.1)** | 980 MB | 980 MB | **0.0%** |
+| Ollama | 2,253 MB | 6.8 s | 0.74 s | **10.8 tokens/s (10.1 to 11.2)** | 953 MB | 953 MB | **0.0%** |
+| llamafile | 368 MB | 2.0 s | **0.71 s** | 7.0 tokens/s (6.4 to 7.2) | **936 MB** | **936 MB** | **0.0%** |
 
 A small cloud computer (2 AMD EPYC cores with AVX2), 2 threads, 7.8 GB RAM, no GPU. Model: `gemma-3-1b-it-Q4_K_M.gguf` for every app, context 2,048, temperature 0, answers of up to 128 tokens, median of 3 prompts x 5 rounds (the apps take turns each round). Speed in brackets: the middle half of the answers. Measured 2026-10-13 by `scripts/benchmark.py`.
+
+**With little free memory.** Each app started inside a memory limit, then asked one short question:
+
+| Memory left for the app | 1.5G | 1G | 750M | 500M |
+|---|---|---|---|---|
+| Trurl | answers in 1 s | answers in 1 s | answers in 12 s | answers in 10 s |
+| Ollama | answers in 1 s | answers in 1 s | does not start | does not start |
+| llamafile | answers in 1 s | answers in 1 s | answers in 5 s | answers in 9 s |
 <!-- benchmarks:end -->
 
 ## For teachers
