@@ -137,7 +137,9 @@ it from the Actions tab. SignPath emails the approver when a request is waiting.
    Signing is on from the next run. Without the variable, releases build unsigned and
    the run shows a warning.
 4. **Try it without releasing:** Actions, Release, **Run workflow**, tick "Code-sign".
-   A dry run builds, signs and smoke-tests everything, and creates no release.
+   A dry run builds, signs and smoke-tests everything, and creates no release. Run it
+   on `main`: if the SignPath signing policy only accepts some branches, a dry run
+   from another branch is refused.
 
 ### What signing does not cover
 

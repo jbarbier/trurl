@@ -469,12 +469,13 @@ if (SUITE === "full") {
     if (!(await box.isChecked())) throw new Error("automatic update check should start on");
     await box.uncheck();
     await closeDialogs();
-    // The saved setting, read back from the core, not the checkbox left on screen.
-    const saved = await page.evaluate(async () => (await window.trurl.call("snapshot")).settings.auto_update_check);
-    if (saved !== false) throw new Error(`core still has auto_update_check=${saved}`);
+    // The saved setting, read back from the core (polled: the save is asynchronous).
+    await page.waitForFunction(async () => (await window.trurl.call("snapshot")).settings.auto_update_check === false, null, { timeout: 5000, polling: 200 });
     await page.click("#openAbout");
-    if (await page.locator("#autoUpdate").isChecked()) throw new Error("About shows it on again after reopening");
+    // Reopened, About reads the setting again (polled: the settings event may still be on its way).
+    await page.waitForFunction(() => document.querySelector("#autoUpdate") && !document.querySelector("#autoUpdate").checked, null, { timeout: 5000 });
     await page.locator("#autoUpdate").check(); // back on, for the steps after this one
+    await page.waitForFunction(async () => (await window.trurl.call("snapshot")).settings.auto_update_check === true, null, { timeout: 5000, polling: 200 });
     await closeDialogs();
   });
 }

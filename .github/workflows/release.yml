@@ -95,6 +95,7 @@ jobs:
           name: trurl-exe-unsigned
           path: target/release/trurl.exe
           if-no-files-found: error
+          overwrite: true   # a re-run after an approval timeout uploads again
       - name: Sign trurl.exe (SignPath; approve the request on signpath.io)
         if: env.SIGN == 'true'
         uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
@@ -135,6 +136,7 @@ jobs:
           name: installers-unsigned
           path: dist/*.exe
           if-no-files-found: error
+          overwrite: true   # a re-run after an approval timeout uploads again
       - name: Sign the installers (SignPath; approve the request on signpath.io)
         if: env.SIGN == 'true'
         uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
@@ -260,12 +262,20 @@ jobs:
       - name: Manifest, checksums, draft release
         env:
           GH_TOKEN: ${{ github.token }}
+          # Same condition as the windows job's SIGN on a tag push (this job runs only then).
+          SIGNED: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
         run: |
           python3 scripts/release_notes.py "$V" > notes.md
           python3 scripts/make_manifest.py --version "$V" --notes-file notes.md \
             --windows "dist/Trurl_${V}_x64-setup.exe" \
             --linux "dist/trurl-${V}-linux-x64.tar.gz" --out dist/latest.json
           (cd dist && sha256sum *.exe *.tar.gz > SHA256SUMS.txt)
-          # The release page (not the in-app update card) also links the signing policy.
-          { cat notes.md; printf '\n\n---\n[Code signing policy](https://github.com/jbarbier/trurl/blob/main/docs/CODE-SIGNING.md): free code signing provided by SignPath.io, certificate by SignPath Foundation.\n'; } > release.md
+          # The release page (not the in-app update card) also links the signing policy,
+          # and credits SignPath only when this release was actually signed.
+          cp notes.md release.md
+          if [ "$SIGNED" = true ]; then
+            printf '\n\n---\nFree code signing provided by SignPath.io, certificate by SignPath Foundation. [Code signing policy](https://github.com/jbarbier/trurl/blob/main/docs/CODE-SIGNING.md)\n' >> release.md
+          else
+            printf '\n\n---\nThe Windows installers of this release are not code-signed. [Code signing policy](https://github.com/jbarbier/trurl/blob/main/docs/CODE-SIGNING.md)\n' >> release.md
+          fi
           gh release create "v$V" --draft --title "Trurl $V" --notes-file release.md dist/*
