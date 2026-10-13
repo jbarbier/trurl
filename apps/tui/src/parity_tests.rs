@@ -230,7 +230,7 @@ fn about_names_the_maker_and_the_version() {
     ui.version = trurl_core::VERSION.into(); // from the core's snapshot
     ui.screen = Screen::About;
     let s = flat(&screen(&ui, 100, 30));
-    assert!(s.contains("by Cyberiad Labs"), "{s}");
+    assert!(s.contains("By Julien Barbier, for Cyberiad Labs"), "{s}");
     assert!(s.contains(trurl_core::VERSION), "{s}");
 }
 

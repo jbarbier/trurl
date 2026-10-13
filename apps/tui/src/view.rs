@@ -1242,7 +1242,7 @@ fn draw_about(f: &mut Frame, ui: &Ui, area: Rect) {
             Span::raw(format!("version {}", ui.version)),
         ]),
         Line::from(Span::styled(
-            "by Cyberiad Labs",
+            "By Julien Barbier, for Cyberiad Labs",
             Style::default().add_modifier(Modifier::BOLD),
         )),
         Line::from(
