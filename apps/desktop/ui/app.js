@@ -1192,7 +1192,7 @@
       d.gated && !(S.settings && S.settings.has_hf_token) && h("p", { class: "gate-note", text: "This model needs a free Hugging Face account. Ask your teacher to add an access token (Ctrl+Shift+S)." }),
       h("h4", { class: "sub-h", text: "Files" }),
       h("p", { class: "muted", text: "Each file is the same model at a different size. Smaller files are faster and use less memory." }),
-      h("p", { class: "muted quant-legend", text: "The version name says how much the model was squeezed: Q4_K_M keeps about 4 bits per number (small, good: the one to pick, listed first); Q8_0 keeps 8 (twice the size, a little more exact). Names starting with IQ or UD are other ways of squeezing: if unsure, take Q4_K_M." }),
+      h("p", { class: "muted quant-legend", text: quantLegend(d.files) }),
       h("table", { class: "files" }, h("thead", null, h("tr", null, h("th", { text: "Version" }), h("th", { text: "Size" }), h("th", { text: "Fits this computer?" }), h("th", null, h("span", { class: "sr-only", text: "Action" })))), hubEls.files),
       h("h4", { class: "sub-h", text: "Model card" }),
     ]);
@@ -1201,6 +1201,14 @@
     else card.append(h("p", { class: "muted", text: "This model has no model card." }));
     hubEls.details.append(card);
     renderFiles();
+  }
+
+  function quantLegend(files) {
+    const rec = (files.find((f) => f.recommended) || {}).quant;
+    const base = "The version name says how much the model was squeezed: Q4 keeps about 4 bits per number (small, good), Q8 keeps 8 (twice the size, a little more exact). Names starting with IQ or UD are other ways of squeezing.";
+    if (rec === "Q4_0") return base + " On this computer's processor, Q4_0 files answer fastest: the recommended one is listed first.";
+    if (rec) return base + ` The recommended one, ${rec}, is listed first.`;
+    return base;
   }
 
   // Tags a learner can use (the language, the license); Hugging Face's
@@ -1214,9 +1222,9 @@
     const d = hub.details;
     if (!d || !hubEls.files) return;
     keepFocus(hubEls.files, () => {
-      const files = [...d.files.filter((f) => f.quant === "Q4_K_M" && !f.split), ...d.files.filter((f) => !(f.quant === "Q4_K_M" && !f.split))];
+      // The core lists the file to pick on this computer first, marked recommended.
       hubEls.files.replaceChildren(
-        ...files.map((f) => {
+        ...d.files.map((f) => {
           const dest = basename(f.path);
           const local = S.models.some((m) => m.file === dest);
           const dl = S.downloads.find((x) => x.dest_file === dest);
@@ -1231,8 +1239,7 @@
               svg(ICON.download),
               "Download"
             );
-          // Q4_K_M is the usual balance of size and quality, and what the course uses.
-          const recommended = f.quant === "Q4_K_M" && !f.split;
+          const recommended = !!f.recommended;
           return h(
             "tr",
             null,
@@ -1362,7 +1369,7 @@
 
   // ---------- About -------------------------------------------------------
 
-  const VARIANT = { avx2: "AVX2", avx: "AVX" };
+  const VARIANT = { avx2: "AVX2", avx: "AVX", ssse3: "SSSE3", compat: "Compatible" };
   let licenses = null;
 
   async function openAbout() {

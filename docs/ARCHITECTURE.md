@@ -52,7 +52,26 @@ OpenSSL 3 on Linux. Many classroom computers do not have those.
 |---|---|---|
 | `avx2` | AVX2, FMA, F16C, BMI2 | Haswell (2013) and newer |
 | `avx` | AVX only | Sandy Bridge and Ivy Bridge (2011 to 2012) |
-| `compat` | SSE2 | any 64-bit Intel or AMD CPU |
+| `ssse3` | SSSE3, no AVX | Core 2 and the first Core i3/i5/i7 (2006 to 2010), Atom, AMD Bobcat |
+| `compat` | SSE2 | any 64-bit Intel or AMD CPU (Pentium 4, Athlon 64, AMD Phenom) |
+
+**Why an SSSE3 build.** llama.cpp has fast SSSE3 code for the Q4_0 and Q8_0 formats
+and none for the K formats (Q4_K_M). Measured on one computer, Gemma 3 1B with each
+engine (words per second while answering / while reading the prompt):
+
+| Engine | Q4_K_M | Q4_0 (QAT) |
+|---|---|---|
+| compat | 2.1 / 2.6 | 2.8 / 3.5 |
+| ssse3 | 2.0 / 2.6 | 8.2 / 16.6 |
+| avx | 10.0 / 17.9 | 12.0 / 22.2 |
+| avx2 | 12.9 / 32.6 | 13.5 / 35.6 |
+
+(2-core AMD EPYC cloud computer, 2 threads, short prompts, temperature 0, each
+engine forced on the same machine.)
+
+So on a processor without AVX2, the Hugging Face screen recommends the Q4_0 file of a
+model when there is one (`hub::recommend`), and Q4_K_M otherwise. The bundled models
+stay Q4_K_M, as pinned.
 
 How the build is picked and kept honest:
 
@@ -81,6 +100,7 @@ How the build is picked and kept honest:
 | `-np 1` | One conversation, so no spare KV cache. |
 | `--cache-ram 0` | The default prompt cache is 8 GB, wrong for a 4 GB laptop. |
 | `--fit off` | Trurl sets the context; llama.cpp must not change it. |
+| `--no-repack` | No second, rearranged copy of the weights in memory. Measured on a 2-core AVX2 computer: Gemma 3 4B uses 2.65 GB instead of 4.1 GB, loads in 2.0 s instead of 4.6 s and answers a little faster; long prompts are read at the same speed (about 45 tokens/s for Gemma 3 1B either way). |
 | `--jinja` | The model's own chat template, from the GGUF file. |
 | `--reasoning-format deepseek` | Reasoning in its own field. |
 | `--no-webui --offline` | Nothing else listens, nothing reaches the network. |

@@ -35,6 +35,8 @@ from collections import Counter
 from pathlib import Path
 
 PATTERNS = {
+    # SSSE3-only instructions (pmaddubsw, pshufb, palignr, phadd/phsub, psign, pabs, pmulhrsw).
+    "ssse3": re.compile(r"\t(v?pmaddubsw|v?pshufb|v?palignr|v?phadd[wd]|v?phsub[wd]|v?psign[bwd]|v?pabs[bwd]|v?pmulhrsw)\b"),
     "avx (ymm registers)": re.compile(r"%ymm\d|\bymm\d"),
     "avx-512 (zmm registers)": re.compile(r"%zmm\d|\bzmm\d|%k[1-7]\b"),
     "fma": re.compile(r"\tvfn?m(add|sub)"),
@@ -42,8 +44,17 @@ PATTERNS = {
     "avx2 integer": re.compile(r"\tvp(broadcast[bwdq]|perm[dq]|maddubsw|maddwd|sllv[dq]|srlv[dq]|gather)\S*\s.*ymm"),
     "vex (any avx encoding)": re.compile(r"\tv(mov|add|sub|mul|xor|and|or|pxor|pand|padd|broadcast|perm|shuf|cvt)\w*\s"),
 }
+# What each tier must contain: a build whose flags were silently dropped would
+# pass every "forbidden" check and still be slow. These catch that.
+REQUIRED = {
+    "ssse3": ["ssse3"],
+    "avx": ["avx (ymm registers)"],
+    "avx2": ["fma", "avx2 integer"],
+}
+
 FORBIDDEN = {
-    "compat": ["avx (ymm registers)", "avx-512 (zmm registers)", "fma", "f16c", "avx2 integer", "vex (any avx encoding)"],
+    "compat": ["ssse3", "avx (ymm registers)", "avx-512 (zmm registers)", "fma", "f16c", "avx2 integer", "vex (any avx encoding)"],
+    "ssse3": ["avx (ymm registers)", "avx-512 (zmm registers)", "fma", "f16c", "avx2 integer", "vex (any avx encoding)"],
     "avx": ["avx-512 (zmm registers)", "fma", "f16c", "avx2 integer"],
     "avx2": ["avx-512 (zmm registers)"],
 }
@@ -139,7 +150,12 @@ def main() -> int:
                 continue
             c = scan(exe)
         found = {k: c[k] for k in forbidden if c[k]}
+        missing = [k for k in REQUIRED.get(variant, []) if not c[k]]
         summary = ", ".join(f"{k}={c[k]}" for k in PATTERNS)
+        if missing:
+            bad += 1
+            print(f"FAIL {variant}: none of its own instructions ({', '.join(missing)}): was it built with its flags?  ({summary})")
+            continue
         if object_mode and std_hits:
             names = sorted({sym for (sym, kind) in std_hits if kind in forbidden})
             if names:

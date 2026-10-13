@@ -49,6 +49,11 @@ impl ServerConfig {
             // We set the context ourselves; do not let llama.cpp shrink or grow it.
             "--fit".into(),
             "off".into(),
+            // No second, rearranged copy of the weights in memory. Measured on a
+            // 2-core AVX2 machine: Gemma 3 4B 2.65 GB instead of 4.1 GB, loads in
+            // 2 s instead of 4.6 s, answers a little faster, reads long prompts
+            // at the same speed. On a 4 GB laptop the memory is what counts.
+            "--no-repack".into(),
             "--jinja".into(),
             "--reasoning-format".into(),
             "deepseek".into(),
@@ -549,7 +554,7 @@ mod tests {
         let a = c.args(5555, ".trurl-llama-5555.key").join(" ");
         assert_eq!(
             a,
-            "-m gemma.gguf -c 2048 -t 4 -np 1 --cache-ram 0 --fit off --jinja --reasoning-format deepseek --no-webui --offline --host 127.0.0.1 --port 5555 --api-key-file .trurl-llama-5555.key"
+            "-m gemma.gguf -c 2048 -t 4 -np 1 --cache-ram 0 --fit off --no-repack --jinja --reasoning-format deepseek --no-webui --offline --host 127.0.0.1 --port 5555 --api-key-file .trurl-llama-5555.key"
         );
     }
 

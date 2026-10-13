@@ -264,10 +264,8 @@ async fn handle(
             }
         }
         Msg::HubDetails(r) => match r {
-            Ok(mut d) => {
-                // The recommended file first, as on the desktop.
-                d.files
-                    .sort_by_key(|f| !(f.quant.as_deref() == Some("Q4_K_M") && !f.split));
+            Ok(d) => {
+                // The core lists the file to pick on this computer first.
                 ui.hub_file_sel = 0;
                 ui.hub_details = Some(d);
                 ui.hub_focus = HubFocus::Files;

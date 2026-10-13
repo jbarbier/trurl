@@ -3,7 +3,7 @@
 //! Slow (minutes) and need files that are not in the repo, so they are
 //! `#[ignore]`d. Run them with:
 //!
-//!   python3 scripts/build_llama.py            # vendor/llama/<os>/{avx2,avx,compat}
+//!   python3 scripts/build_llama.py            # vendor/llama/<os>/{avx2,avx,ssse3,compat}
 //!   python3 scripts/fetch_models.py --dest ~/trurl-models
 //!   TRURL_TEST_MODELS=~/trurl-models cargo test -p trurl-core --test live -- --ignored --test-threads 1
 //!
@@ -263,6 +263,9 @@ async fn temperature_zero_is_repeatable() {
 async fn small_context_runs_out_of_room_with_the_course_message() {
     let h = harness(&[GEMMA], |_| {});
     h.ready(GEMMA).await;
+    // Temperature 0: at 0.7 the model sometimes stops counting by itself (seen at 30),
+    // which is a choice of the model, not the context running out.
+    h.app.set_temperature(0.0);
     h.app.set_context(256);
     h.wait("reload at 256", 300, |app, _| match app.snapshot().engine {
         EngineState::Ready { context: 256, .. } => Some(()),

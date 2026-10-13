@@ -8,6 +8,7 @@ instruction that processor does not have. A build that answers here will not
 crash with "illegal instruction" on a learner's old laptop.
 
   compat  -> Pentium 4 Prescott (2004, SSE3, no SSSE3, no AVX)
+  ssse3   -> Core 2 Merom      (2006, SSSE3, no SSE4.2, no AVX)
   avx     -> Sandy Bridge      (2011, AVX, no FMA, no AVX2)
   avx2    -> Haswell           (2013, AVX2 + FMA + F16C + BMI2)
 
@@ -39,7 +40,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PINS = json.loads((ROOT / "pins.json").read_text())
-CHIPS = {"compat": "-p4p", "avx": "-snb", "avx2": "-hsw"}
+CHIPS = {"compat": "-p4p", "ssse3": "-mrm", "avx": "-snb", "avx2": "-hsw"}
 WINDOWS = platform.system() == "Windows"
 
 
@@ -135,7 +136,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("root", nargs="?", default=str(ROOT / "vendor/llama" / ("windows" if WINDOWS else "linux")))
     ap.add_argument("--model", required=True, help="a tiny GGUF, e.g. stories260K.gguf")
-    ap.add_argument("--variants", default="compat,avx,avx2")
+    ap.add_argument("--variants", default="compat,ssse3,avx,avx2")
     ap.add_argument("--cache", default=str(Path.home() / ".cache" / "trurl"))
     ap.add_argument("--budget", type=float, default=600, help="seconds allowed per build")
     a = ap.parse_args()

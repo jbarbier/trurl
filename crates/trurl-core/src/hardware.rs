@@ -8,6 +8,9 @@ use serde::Serialize;
 pub enum CpuVariant {
     /// Any x86-64 CPU (SSE2).
     Compat,
+    /// SSSE3, no AVX: Core 2 and the first Core i3/i5/i7 (2006-2010), Atom, AMD
+    /// Bobcat. Q4_0 models run about three times faster than on Compat.
+    Ssse3,
     /// AVX, no AVX2: Sandy Bridge and Ivy Bridge (2011-2012), common in second-hand laptops.
     Avx,
     /// AVX2 + FMA + F16C + BMI2: Haswell (2013) and newer.
@@ -19,6 +22,7 @@ impl CpuVariant {
         match self {
             CpuVariant::Avx2 => "avx2",
             CpuVariant::Avx => "avx",
+            CpuVariant::Ssse3 => "ssse3",
             CpuVariant::Compat => "compat",
         }
     }
@@ -27,7 +31,8 @@ impl CpuVariant {
     pub fn fallback(self) -> Option<CpuVariant> {
         match self {
             CpuVariant::Avx2 => Some(CpuVariant::Avx),
-            CpuVariant::Avx => Some(CpuVariant::Compat),
+            CpuVariant::Avx => Some(CpuVariant::Ssse3),
+            CpuVariant::Ssse3 => Some(CpuVariant::Compat),
             CpuVariant::Compat => None,
         }
     }
@@ -45,6 +50,7 @@ pub struct Hardware {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct CpuFeatures {
+    pub ssse3: bool,
     pub avx: bool,
     pub avx2: bool,
     pub fma: bool,
@@ -57,6 +63,7 @@ impl CpuFeatures {
         #[cfg(target_arch = "x86_64")]
         {
             CpuFeatures {
+                ssse3: std::is_x86_feature_detected!("ssse3"),
                 avx: std::is_x86_feature_detected!("avx"),
                 avx2: std::is_x86_feature_detected!("avx2"),
                 fma: std::is_x86_feature_detected!("fma"),
@@ -78,6 +85,8 @@ impl CpuFeatures {
             CpuVariant::Avx2
         } else if self.avx {
             CpuVariant::Avx
+        } else if self.ssse3 {
+            CpuVariant::Ssse3
         } else {
             CpuVariant::Compat
         }
@@ -208,6 +217,7 @@ mod tests {
     #[test]
     fn variant_tiers() {
         let all = CpuFeatures {
+            ssse3: true,
             avx: true,
             avx2: true,
             fma: true,
@@ -231,19 +241,29 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(sandy.variant(), CpuVariant::Avx);
-        // Core 2, early Atom, Pentium: nothing.
+        // Pentium 4, Athlon 64, AMD Phenom: no SSSE3.
         assert_eq!(CpuFeatures::default().variant(), CpuVariant::Compat);
-        // AVX2 bits without AVX (OS has AVX disabled) cannot run either AVX build.
+        // AVX2 bits without AVX (the OS has AVX disabled) cannot run either AVX
+        // build, but SSSE3 needs no OS support: the SSSE3 build.
         let no_os_avx = CpuFeatures { avx: false, ..all };
-        assert_eq!(no_os_avx.variant(), CpuVariant::Compat);
+        assert_eq!(no_os_avx.variant(), CpuVariant::Ssse3);
     }
 
     #[test]
     fn fallback_chain() {
         assert_eq!(CpuVariant::Avx2.fallback(), Some(CpuVariant::Avx));
-        assert_eq!(CpuVariant::Avx.fallback(), Some(CpuVariant::Compat));
+        assert_eq!(CpuVariant::Avx.fallback(), Some(CpuVariant::Ssse3));
+        assert_eq!(CpuVariant::Ssse3.fallback(), Some(CpuVariant::Compat));
         assert_eq!(CpuVariant::Compat.fallback(), None);
-        assert!(CpuVariant::Compat < CpuVariant::Avx && CpuVariant::Avx < CpuVariant::Avx2);
+        assert!(CpuVariant::Compat < CpuVariant::Ssse3 && CpuVariant::Ssse3 < CpuVariant::Avx);
+        assert!(CpuVariant::Avx < CpuVariant::Avx2);
+        // A Core 2 (SSSE3, no AVX) gets the SSSE3 engine.
+        let core2 = CpuFeatures {
+            ssse3: true,
+            ..Default::default()
+        };
+        assert_eq!(core2.variant(), CpuVariant::Ssse3);
+        assert_eq!(CpuFeatures::default().variant(), CpuVariant::Compat);
     }
 
     #[test]

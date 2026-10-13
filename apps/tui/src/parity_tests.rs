@@ -312,7 +312,10 @@ fn a_question_about_the_editor_is_drawn_on_top_of_it() {
     for (w, h) in [(80, 24), (120, 34)] {
         let s = flat(&screen(&ui, w, h));
         assert!(s.contains("Leave without saving?"), "{w}x{h}: {s}");
-        assert!(s.contains("Enter yes") || s.contains("Enter: leave"), "{w}x{h}: {s}");
+        assert!(
+            s.contains("Enter yes") || s.contains("Enter: leave"),
+            "{w}x{h}: {s}"
+        );
     }
 }
 
@@ -365,5 +368,8 @@ fn hugging_face_warnings_wrap_at_80_columns() {
         files: vec![],
     });
     let s = flat(&screen(&ui, 80, 24));
-    assert!(s.contains("Look for a model whose name ends in Instruct or Chat."), "{s}");
+    assert!(
+        s.contains("Look for a model whose name ends in Instruct or Chat."),
+        "{s}"
+    );
 }

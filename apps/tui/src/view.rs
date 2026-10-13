@@ -1081,7 +1081,14 @@ fn draw_hub_details(f: &mut Frame, ui: &Ui, area: Rect) {
         ));
     }
     head.extend(wrap_plain(
-        "Each file is the same model at a different size. Q4_K_M (listed first) is small and good: the one to pick. Q8_0 is twice the size, a little more exact. IQ and UD names are other ways of squeezing.",
+        &format!(
+            "Each file is the same model at a different size: Q4 keeps about 4 bits per number (small, good), Q8 keeps 8 (twice the size, a little more exact); IQ and UD are other ways of squeezing.{}",
+            match d.files.iter().find(|f| f.recommended).and_then(|f| f.quant.as_deref()) {
+                Some("Q4_0") => " On this computer's processor, Q4_0 answers fastest: the recommended file is listed first.".to_string(),
+                Some(q) => format!(" The recommended one, {q}, is listed first."),
+                None => String::new(),
+            }
+        ),
         w,
         Style::default().fg(DIM),
         Span::raw(""),
@@ -1126,7 +1133,7 @@ fn draw_hub_details(f: &mut Frame, ui: &Ui, area: Rect) {
             ));
         } else {
             s.extend(fit_span(file.fit));
-            if file.quant.as_deref() == Some("Q4_K_M") {
+            if file.recommended {
                 s.push(Span::styled(
                     "  Recommended",
                     Style::default().fg(Color::Green),
@@ -1286,6 +1293,7 @@ fn draw_about(f: &mut Frame, ui: &Ui, area: Rect) {
         let tier = match h.variant {
             CpuVariant::Avx2 => "AVX2",
             CpuVariant::Avx => "AVX",
+            CpuVariant::Ssse3 => "SSSE3",
             CpuVariant::Compat => "Compatible",
         };
         l.push(Line::from(format!(

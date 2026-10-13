@@ -17,7 +17,7 @@ python3 scripts/check_pe_imports.py vendor/llama/linux
 rm -rf "$OUT"
 mkdir -p "$OUT/llama" "$OUT/licenses"
 cp target/release/trurl "$OUT/trurl"
-for v in avx2 avx compat; do
+for v in avx2 avx ssse3 compat; do
   mkdir -p "$OUT/llama/$v"
   cp "vendor/llama/linux/$v/llama-server" "$OUT/llama/$v/"
 done

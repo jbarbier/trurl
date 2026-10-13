@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the pinned llama-server, three times, from source.
+"""Build the pinned llama-server, four times, from source.
 
 Why from source instead of the official release zips:
   * The official Windows build needs the Visual C++ runtime (MSVCP140.dll),
@@ -11,6 +11,7 @@ no OpenMP. Nothing to install, nothing to go missing.
 Three CPU tiers, picked by Trurl at startup (crates/trurl-core/src/hardware.rs):
   avx2    Haswell (2013) and newer: AVX2 + FMA + F16C + BMI2
   avx     Sandy Bridge / Ivy Bridge (2011-2012): AVX only
+  ssse3   Core 2, first Core i3/i5/i7, Atom, AMD Bobcat (2006-2010): SSSE3, no AVX
   compat  any x86-64 CPU (SSE2)
 
 The build never touches the network except to fetch the pinned source tarball,
@@ -62,9 +63,19 @@ COMMON = [
 
 OFF_ALL = ["-DGGML_SSE42=OFF", "-DGGML_AVX=OFF", "-DGGML_AVX2=OFF", "-DGGML_BMI2=OFF", "-DGGML_FMA=OFF", "-DGGML_F16C=OFF"]
 
+# Extra compiler flags per variant and OS, passed as CFLAGS/CXXFLAGS (CMake adds
+# them to its own defaults). MSVC compiles SSSE3 code on x64 without a switch,
+# but ggml only uses it when __SSSE3__ is defined.
+VARIANT_CFLAGS = {
+    "ssse3": {"linux": "-mssse3", "windows": "/D__SSE3__ /D__SSSE3__"},
+}
+
 VARIANTS = {
     "avx2": ["-DGGML_SSE42=ON", "-DGGML_AVX=ON", "-DGGML_AVX2=ON", "-DGGML_BMI2=ON", "-DGGML_FMA=ON", "-DGGML_F16C=ON"],
     "avx": ["-DGGML_SSE42=ON", "-DGGML_AVX=ON", "-DGGML_AVX2=OFF", "-DGGML_BMI2=OFF", "-DGGML_FMA=OFF", "-DGGML_F16C=OFF"],
+    # Core 2 and the first Core i3/i5/i7 (2006-2010), Atom, AMD Bobcat: SSSE3, no AVX.
+    # ggml has no switch for it: the compiler flag comes from VARIANT_CFLAGS.
+    "ssse3": OFF_ALL,
     "compat": OFF_ALL,
 }
 
@@ -117,8 +128,14 @@ def build(src: Path, build_root: Path, variant: str, cmake: str, jobs: int, os_n
         if Path(gen).exists():
             args += ["-G", "Ninja", f"-DCMAKE_MAKE_PROGRAM={gen}"]
         args += ["-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc"]
+    env = dict(os.environ)
+    extra = VARIANT_CFLAGS.get(variant, {}).get(os_name)
+    if extra:
+        env["CFLAGS"] = (env.get("CFLAGS", "") + " " + extra).strip()
+        env["CXXFLAGS"] = (env.get("CXXFLAGS", "") + " " + extra).strip()
+        print(f"+ CFLAGS={env['CFLAGS']!r}", flush=True)
     print("+", " ".join(args), flush=True)
-    subprocess.run(args, check=True)
+    subprocess.run(args, check=True, env=env)
     subprocess.run([cmake, "--build", str(bdir), "--config", "Release", "--target", "llama-server", "-j", str(jobs)], check=True)
     exe = "llama-server.exe" if os_name == "windows" else "llama-server"
     for cand in [bdir / "bin" / "Release" / exe, bdir / "bin" / exe]:
@@ -129,7 +146,7 @@ def build(src: Path, build_root: Path, variant: str, cmake: str, jobs: int, os_n
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--variants", default="avx2,avx,compat")
+    ap.add_argument("--variants", default="avx2,avx,ssse3,compat")
     ap.add_argument("--cmake", default=shutil.which("cmake") or "cmake")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
     ap.add_argument("--cache", default=str(Path.home() / ".cache" / "trurl"))

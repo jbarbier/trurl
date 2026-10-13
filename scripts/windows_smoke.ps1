@@ -46,7 +46,7 @@ foreach ($m in "Qwen_Qwen3-0.6B-Q4_K_M.gguf", "gemma-3-1b-it-Q4_K_M.gguf") {
   if ((Get-Item $f).Length -ne (Get-Item (Join-Path $usb "models\$m")).Length) { throw "$m copied incompletely" }
 }
 if (Get-ChildItem $data -Filter *.part) { throw "a .part file was left behind" }
-foreach ($v in "avx2", "avx", "compat") {
+foreach ($v in "avx2", "avx", "ssse3", "compat") {
   if (-not (Test-Path (Join-Path $env:LOCALAPPDATA "Trurl\llama\$v\llama-server.exe"))) { throw "llama-server $v missing from install" }
 }
 $installed = (Get-ChildItem (Join-Path $env:LOCALAPPDATA "Trurl") -Recurse -File | Measure-Object -Sum Length).Sum

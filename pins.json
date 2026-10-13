@@ -18,6 +18,7 @@
     "variants": {
       "avx2": "AVX2 + FMA + F16C + BMI2 (Haswell, 2013, and newer)",
       "avx": "AVX only (Sandy Bridge and Ivy Bridge, 2011-2012)",
+      "ssse3": "SSSE3, no AVX (Core 2, first Core i3/i5/i7, Atom, AMD Bobcat: 2006-2010)",
       "compat": "any x86-64 CPU (SSE2)"
     }
   },

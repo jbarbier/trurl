@@ -134,8 +134,8 @@
     const README = "# Qwen3 0.6B (GGUF)\n\nQuantized by **bartowski** with llama.cpp.\n\nQwen3 is a family of models that can **think** before answering. Add `/no_think` to your message to turn thinking off.\n\n## Which file should I pick?\n\n| File | Size | Notes |\n|---|---|---|\n| Q4_K_M | 484 MB | Good balance, recommended |\n| Q8_0 | 805 MB | Highest quality |\n\n## License\n\nApache 2.0.";
     function details(repo) {
       const files = [
+        { path: "Qwen_Qwen3-0.6B-Q4_K_M.gguf", size: 484220320, sha256: "b".repeat(64), quant: "Q4_K_M", fit: "green", split: false, recommended: true },
         { path: "Qwen_Qwen3-0.6B-Q2_K.gguf", size: 347000000, sha256: "a".repeat(64), quant: "Q2_K", fit: "green", split: false },
-        { path: "Qwen_Qwen3-0.6B-Q4_K_M.gguf", size: 484220320, sha256: "b".repeat(64), quant: "Q4_K_M", fit: "green", split: false },
         { path: "Qwen_Qwen3-0.6B-Q8_0.gguf", size: 804750592, sha256: "c".repeat(64), quant: "Q8_0", fit: "green", split: false },
         { path: "Qwen_Qwen3-0.6B-bf16.gguf", size: 1509347488, sha256: "d".repeat(64), quant: "BF16", fit: "green", split: false },
         { path: "big/Qwen-big-00001-of-00002.gguf", size: 3500000000, sha256: "e".repeat(64), quant: null, fit: "red", split: true },

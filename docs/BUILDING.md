@@ -25,7 +25,7 @@ python3 scripts/build_llama.py
 
 - **What it does:**
   - Downloads the pinned llama.cpp source and checks its SHA-256.
-  - Builds three static `llama-server` executables into `vendor/llama/<os>/{avx2,avx,compat}/`.
+  - Builds four static `llama-server` executables into `vendor/llama/<os>/{avx2,avx,ssse3,compat}/`.
 - **How long:** 10 to 30 minutes per build on a laptop.
 - **What they need:** nothing. There is no DLL, no Visual C++ runtime and no OpenSSL.
 - **Proving it.** These checks need `objdump` (binutils; on Windows, LLVM's

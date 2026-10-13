@@ -29,6 +29,9 @@ pub struct RepoFile {
     pub fit: RamFit,
     /// Part of a model split over several files: Trurl cannot download those.
     pub split: bool,
+    /// The one file to pick on this computer (see `recommend`).
+    #[serde(default)]
+    pub recommended: bool,
 }
 
 /// Everything the details view shows about one repository.
@@ -299,6 +302,31 @@ pub fn chat_kind(pipeline_tag: Option<&str>, id: &str) -> Option<bool> {
     None
 }
 
+/// Mark the one file to pick on this computer, and list it first. With AVX2,
+/// Q4_K_M (small, good, what the course uses). Without AVX2, Q4_0 when the repo
+/// has it: llama.cpp has fast SSSE3 and AVX code for Q4_0 and none for the K
+/// formats, so on a 2006-2010 (SSSE3) processor Q4_0 answers about four times faster
+/// (measured: Gemma 3 1B, 8.2 against 2.0 words per second).
+pub fn recommend(files: &mut [RepoFile], variant: crate::hardware::CpuVariant) {
+    use crate::hardware::CpuVariant;
+    let ok = |f: &RepoFile, q: &str| !f.split && f.quant.as_deref() == Some(q);
+    let order: &[&str] = if variant >= CpuVariant::Avx2 {
+        &["Q4_K_M", "Q4_0"]
+    } else {
+        &["Q4_0", "Q4_K_M"]
+    };
+    for f in files.iter_mut() {
+        f.recommended = false;
+    }
+    if let Some(i) = order
+        .iter()
+        .find_map(|q| files.iter().position(|f| ok(f, q)))
+    {
+        files[i].recommended = true;
+        files[..=i].rotate_right(1);
+    }
+}
+
 fn repo_files(r: ApiRepo, total_ram: u64) -> RepoFiles {
     let license = r
         .card
@@ -330,6 +358,7 @@ fn repo_files(r: ApiRepo, total_ram: u64) -> RepoFiles {
                 quant: crate::models::quant_from_name(&name),
                 fit: ram_fit(size, total_ram),
                 split: crate::gguf::split_part(&name).is_some(),
+                recommended: false,
                 sha256: s.lfs.map(|l| l.sha256),
                 size,
                 path: s.rfilename,
@@ -423,6 +452,31 @@ pub fn urlencode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_processors_are_pointed_to_q4_0() {
+        use crate::hardware::CpuVariant;
+        let file = |q: &str| RepoFile {
+            path: format!("m-{q}.gguf"),
+            size: 1,
+            sha256: None,
+            quant: Some(q.into()),
+            fit: crate::hardware::RamFit::Green,
+            split: false,
+            recommended: false,
+        };
+        let mut files = vec![file("Q2_K"), file("Q4_0"), file("Q4_K_M"), file("Q8_0")];
+        recommend(&mut files, CpuVariant::Avx2);
+        assert!(files[0].recommended && files[0].quant.as_deref() == Some("Q4_K_M"));
+        assert_eq!(files.iter().filter(|f| f.recommended).count(), 1);
+        recommend(&mut files, CpuVariant::Ssse3);
+        assert!(files[0].recommended && files[0].quant.as_deref() == Some("Q4_0"));
+        assert_eq!(files.iter().filter(|f| f.recommended).count(), 1);
+        // No Q4_0 in the repo: Q4_K_M all the same.
+        let mut files = vec![file("Q2_K"), file("Q4_K_M")];
+        recommend(&mut files, CpuVariant::Compat);
+        assert!(files[0].recommended && files[0].quant.as_deref() == Some("Q4_K_M"));
+    }
 
     #[test]
     fn models_that_cannot_chat_are_marked() {

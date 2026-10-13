@@ -983,7 +983,9 @@ impl App {
     }
 
     pub async fn hub_details(&self, repo: &str) -> Result<RepoFiles, UserError> {
-        self.hub().details(repo, self.inner.hw.total_ram).await
+        let mut d = self.hub().details(repo, self.inner.hw.total_ram).await?;
+        crate::hub::recommend(&mut d.files, self.inner.hw.variant);
+        Ok(d)
     }
 
     pub fn download_start(&self, req: DownloadRequest) -> Result<String, UserError> {

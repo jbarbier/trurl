@@ -64,8 +64,8 @@ jobs:
           key: llama-models-linux-${{ hashFiles('pins.json', 'scripts/build_llama.py') }}
       - run: sudo apt-get update && sudo apt-get install -y ninja-build tmux
       - run: rustup toolchain install
-      - name: Build llama-server (avx2, avx, compat)
-        run: test -x vendor/llama/linux/compat/llama-server || python3 scripts/build_llama.py
+      - name: Build llama-server (avx2, avx, ssse3, compat)
+        run: test -x vendor/llama/linux/ssse3/llama-server || python3 scripts/build_llama.py
       - name: Each llama-server build uses only its CPU tier's instructions
         run: python3 scripts/check_cpu_isa.py vendor/llama/linux && python3 scripts/check_pe_imports.py vendor/llama/linux
       - name: Each build answers on an emulated CPU of its tier (Intel SDE)
@@ -110,8 +110,8 @@ jobs:
             ${{ env.TRURL_TEST_MODELS }}
           key: llama-models-windows-${{ hashFiles('pins.json', 'scripts/build_llama.py') }}
       - run: rustup toolchain install
-      - name: Build llama-server (avx2, avx, compat), static, no VC++ runtime
-        run: if (-not (Test-Path vendor/llama/windows/compat/llama-server.exe)) { python scripts/build_llama.py }
+      - name: Build llama-server (avx2, avx, ssse3, compat), static, no VC++ runtime
+        run: if (-not (Test-Path vendor/llama/windows/ssse3/llama-server.exe)) { python scripts/build_llama.py }
       - name: Check llama-server needs no DLL beyond Windows itself
         run: python scripts/check_pe_imports.py vendor/llama/windows
       - name: llama.cpp's own code uses only its CPU tier's instructions
@@ -181,7 +181,7 @@ jobs:
             ${{ env.TRURL_TEST_MODELS }}
           key: llama-models-windows-${{ hashFiles('pins.json', 'scripts/build_llama.py') }}
       - run: rustup toolchain install
-      - run: if (-not (Test-Path vendor/llama/windows/compat/llama-server.exe)) { python scripts/build_llama.py }
+      - run: if (-not (Test-Path vendor/llama/windows/ssse3/llama-server.exe)) { python scripts/build_llama.py }
       - run: python scripts/fetch_models.py --dest $env:TRURL_TEST_MODELS --only qwen3-0.6b
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:

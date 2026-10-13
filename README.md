@@ -200,14 +200,21 @@ Windows 10 or 11, and the terminal app is not built for Windows yet. A terminal
 build for old Windows is the planned way to reach them. The Linux build is checked
 on every release to need nothing newer than glibc 2.31 (`scripts/check_glibc.py`).
 
-**CPU:** any 64-bit Intel or AMD. Trurl picks the fastest of its three model engines
+**CPU:** any 64-bit Intel or AMD. Trurl picks the fastest of its four model engines
 when it starts:
 
 - **AVX2:** Haswell, 2013, and newer.
 - **AVX:** Sandy Bridge and Ivy Bridge, 2011 to 2012, common in second-hand laptops.
-- **Compatible:** anything older. It contains no AVX instruction at all, which
-  `scripts/check_cpu_isa.py` proves on every build, and it answers on an emulated
-  2004 Pentium 4 (`scripts/check_cpu_emulated.py`).
+- **SSSE3:** Core 2 and the first Core i3/i5/i7, 2006 to 2010, and Atom netbooks. On
+  these, models in the Q4_0 format answer about four times faster than Q4_K_M:
+  the Hugging Face screen recommends Q4_0 files there.
+- **Compatible:** anything older (Pentium 4, Athlon 64, AMD Phenom). It is slow
+  (about 2 words per second for Gemma 3 1B), but it runs.
+
+Each engine contains only the instructions of its processors, which
+`scripts/check_cpu_isa.py` proves on every build, and each one answers on an
+emulated processor of its oldest kind, down to a 2004 Pentium 4
+(`scripts/check_cpu_emulated.py`, Intel's emulator).
 
 If a computer cannot run the engine Trurl picked, Trurl moves down a level by itself.
 
@@ -329,7 +336,8 @@ Trurl is a small Rust program around [llama.cpp](https://github.com/ggml-org/lla
   on this computer (127.0.0.1) and protected by a random key, and stops it when
   Trurl closes, even if Trurl crashes (tested on Linux by killing Trurl in CI, and on
   Windows by the smoke test, which ends Trurl the way a crash would).
-- **Low-RAM settings.** One conversation at a time, no prompt cache, threads =
+- **Low-RAM settings.** One conversation at a time, no prompt cache, no second
+  copy of the weights (`--no-repack`: Gemma 3 4B needs 2.65 GB instead of 4.1 GB), threads =
   physical cores, memory-mapped weights.
 - **Chat template and reasoning.** The model's own chat template comes from its
   file. Reasoning is separated by llama-server, with a fallback for raw `<think>`
