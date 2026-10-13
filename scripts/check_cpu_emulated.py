@@ -223,6 +223,9 @@ def run(sde: Path, chip: str, exe: Path, model: Path, log: Path, budget: float) 
         except Exception as e:
             return False, f"{type(e).__name__}: {e}"
         finally:
+            if WINDOWS:
+                # Killing sde.exe leaves the llama-server.exe it launched running: kill the tree.
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
             proc.kill()
             proc.wait()
 

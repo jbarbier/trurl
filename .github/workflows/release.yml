@@ -93,6 +93,17 @@ jobs:
     # Pinned by digest: the tag moves with every Debian point release.
     container: debian:bullseye@sha256:6f519a81440354a85eb592c5f32109ab80605f6b892455983a6f618bf87fabe9
     steps:
+      # Bullseye reached end of life on 2026-08-31 and its packages moved to
+      # archive.debian.org (deb.debian.org now answers 404 for them). Signatures
+      # are still checked with the image's own Debian keyring.
+      - name: Debian 11 packages from archive.debian.org
+        run: |
+          printf '%s\n' \
+            'deb http://archive.debian.org/debian bullseye main' \
+            'deb http://archive.debian.org/debian bullseye-updates main' \
+            'deb http://archive.debian.org/debian-security bullseye-security main' \
+            > /etc/apt/sources.list
+          rm -f /etc/apt/sources.list.d/*
       - run: apt-get update && apt-get install -y --no-install-recommends build-essential ca-certificates curl git python3 ninja-build binutils
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Pinned CMake

@@ -97,9 +97,20 @@ try {
   Write-Host "DESKTOP MEMORY: $total MB working set in all (trurl.exe, WebView2, llama-server with the model mapped)"
 
   Step "Close Trurl: llama-server must stop with it"
+  # Only the installed copies: an earlier CI step may have left its own llama-server behind.
+  $ours = Join-Path $env:LOCALAPPDATA "Trurl\llama\"
+  function OurServers {
+    @(Get-CimInstance Win32_Process -Filter "Name='llama-server.exe'" |
+      Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($ours, [StringComparison]::OrdinalIgnoreCase) })
+  }
+  if ((OurServers).Count -eq 0) { throw "no installed llama-server was running before Trurl closed" }
   Stop-Process -Id $proc.Id
-  Start-Sleep -Seconds 5
-  if (Get-Process llama-server -ErrorAction SilentlyContinue) { throw "llama-server still running after Trurl closed" }
+  $t0 = Get-Date
+  while ((OurServers).Count -gt 0 -and ((Get-Date) - $t0).TotalSeconds -lt 15) { Start-Sleep -Milliseconds 250 }
+  Get-CimInstance Win32_Process -Filter "Name='llama-server.exe'" |
+    Format-Table ProcessId, ParentProcessId, CreationDate, ExecutablePath -AutoSize | Out-String | Write-Host
+  if ((OurServers).Count -gt 0) { throw "llama-server still running 15 s after Trurl closed" }
+  Write-Host ("llama-server stopped {0:N1} s after Trurl closed" -f ((Get-Date) - $t0).TotalSeconds)
 } finally {
   foreach ($r in $rules) { Remove-NetFirewallRule -DisplayName $r }
 }
