@@ -219,6 +219,10 @@ async fn handle(
                 ui.hub_query.insert_str(&s.replace('\n', " "));
             } else if ui.screen == Screen::Token {
                 ui.token.insert_str(s.trim());
+            } else if ui.screen == Screen::Models {
+                // A file dragged into the window arrives as a pasted path.
+                let path = s.trim().trim_matches(['"', '\'']).to_string();
+                ui.prompt = Some((PromptKind::ImportPath, text::Editor::with(&path)));
             }
         }
         Msg::Resize => {}
@@ -260,12 +264,11 @@ async fn handle(
             }
         }
         Msg::HubDetails(r) => match r {
-            Ok(d) => {
-                ui.hub_file_sel = d
-                    .files
-                    .iter()
-                    .position(|f| f.quant.as_deref() == Some("Q4_K_M"))
-                    .unwrap_or(0);
+            Ok(mut d) => {
+                // The recommended file first, as on the desktop.
+                d.files
+                    .sort_by_key(|f| !(f.quant.as_deref() == Some("Q4_K_M") && !f.split));
+                ui.hub_file_sel = 0;
                 ui.hub_details = Some(d);
                 ui.hub_focus = HubFocus::Files;
                 ui.hub_readme_scroll = 0;
@@ -387,6 +390,8 @@ async fn on_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: Key
                     if path.is_file() {
                         ui.notice = None;
                         core.import_model(path);
+                    } else if path.is_dir() {
+                        ui.notice = Some(UserError::import_folder(&p));
                     } else {
                         ui.notice = Some(UserError::import_missing(&p));
                     }
@@ -399,7 +404,7 @@ async fn on_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: Key
 
     // Global keys. Ctrl+C is "copy" to most learners: never quit on it without asking.
     if ctrl(&k, 'q') || ctrl(&k, 'c') {
-        if ui.turns.is_empty() && !ui.generating {
+        if ui.turns.is_empty() && !ui.generating && ui.input.text.trim().is_empty() {
             ui.quit = true;
         } else {
             ui.confirm = Some(Confirm::Quit);
@@ -447,6 +452,11 @@ async fn on_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: Key
         return;
     }
 
+    // Esc closes an error first, on every screen ("Esc to close" must work there).
+    if k.code == KeyCode::Esc && ui.notice.is_some() && ui.screen != Screen::Chat {
+        ui.notice = None;
+        return;
+    }
     match ui.screen {
         Screen::Chat => chat_key(ui, core, k),
         Screen::Settings => settings_key(ui, core, k),
@@ -586,6 +596,10 @@ fn chat_key(ui: &mut Ui, core: &App, k: KeyEvent) {
 /// how. The course asks learners to keep answers in their notes.
 fn copy_last_answer(ui: &mut Ui) {
     use std::io::Write;
+    if ui.generating {
+        ui.say("Wait until the answer is finished (or press Esc to stop it), then press F6.");
+        return;
+    }
     let Some(t) = ui.turns.iter().rev().find(|t| !t.answer.trim().is_empty()) else {
         ui.say("There is no answer to copy yet.");
         return;
@@ -608,10 +622,17 @@ fn copy_last_answer(ui: &mut Ui) {
     } else {
         format!("system prompt: {}", t.system_prompt.trim())
     };
+    let stopped = match t.status {
+        trurl_core::chat::TurnStatus::Stopped => " (stopped before the end)",
+        trurl_core::chat::TurnStatus::Cut => " (cut: the context ran out)",
+        _ => "",
+    };
     let entry = format!(
-        "----- {} · temperature {:.1} · {sp}\nQuestion: {}\n\n{answer}\n\n",
+        "----- {} · {} · temperature {:.1} · context {} · {sp}\nQuestion: {}\n\n{answer}{stopped}\n\n",
+        today(),
         t.model,
         t.temperature,
+        t.context,
         t.user.trim()
     );
     let saved = std::fs::OpenOptions::new()
@@ -619,10 +640,41 @@ fn copy_last_answer(ui: &mut Ui) {
         .append(true)
         .open(&notes)
         .and_then(|mut f| f.write_all(entry.as_bytes()));
+    // The clipboard part depends on the terminal (Windows Terminal: yes; GNOME
+    // Terminal: no), so the message promises only what is certain.
+    let short = notes
+        .strip_prefix(
+            std::env::var_os("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_default(),
+        )
+        .map(|p| format!("~/{}", p.display()))
+        .unwrap_or_else(|_| notes.display().to_string());
     ui.say(match saved {
-        Ok(()) => format!("Copied. Also added to {}", notes.display()),
-        Err(_) => "Copied (if your terminal allows it).".into(),
+        Ok(()) => format!("Saved in {short}. Also copied, if your terminal allows it."),
+        Err(_) => {
+            "Copied, if your terminal allows it (the notes file could not be written).".into()
+        }
     });
+}
+
+/// Today's date as YYYY-MM-DD, from the system clock (no time zone library).
+fn today() -> String {
+    let days = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() / 86_400)
+        .unwrap_or(0) as i64;
+    // Howard Hinnant's civil_from_days.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}")
 }
 
 fn send_input(ui: &mut Ui, core: &App) {
@@ -870,6 +922,18 @@ fn hub_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: KeyEvent
                     ui.notice = Some(
                         UserError::not_gguf(&f.path).with_detail("split files are not supported"),
                     );
+                    return;
+                }
+                let dest = f.path.rsplit('/').next().unwrap_or(&f.path).to_string();
+                if ui.models.iter().any(|m| m.file == dest) {
+                    ui.say(format!("{dest} is already on this computer (F2)."));
+                    return;
+                }
+                if ui.downloads.iter().any(|x| x.dest_file == dest) {
+                    ui.hub_focus = HubFocus::Downloads;
+                    ui.say(format!(
+                        "{dest} is already downloading: P pauses or resumes it."
+                    ));
                     return;
                 }
                 let req = DownloadRequest {

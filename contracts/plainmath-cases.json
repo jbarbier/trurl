@@ -13,7 +13,7 @@
   ["Pay $5, then $ 3 more.", "Pay $5, then $ 3 more."],
   ["$\\left( 2 + 3 \\right) \\cdot 4$", "(2 + 3) · 4"],
   ["No math here at all.", "No math here at all."],
-  ["$x_1 + x_2$", "x1 + x2"],
+  ["$x_1 + x_2$", "x₁ + x₂"],
   ["Run `echo $HOME and $PATH` now.", "Run `echo $HOME and $PATH` now."],
   ["```bash\nprice=$5; echo $price and $HOME\n```", "```bash\nprice=$5; echo $price and $HOME\n```"],
   ["Solve: $2x = 10$, so $x = 5$.", "Solve: 2x = 10, so x = 5."],
@@ -24,5 +24,12 @@
   ["$\\begin{aligned} x &= 2 \\\\ y &= 3 \\end{aligned}$", "x = 2\ny = 3"],
   ["$\\binom{5}{2} = 10$", "C(5, 2) = 10"],
   ["$\\lfloor 3.7 \\rfloor = 3$", "⌊3.7⌋ = 3"],
-  ["$x \\in \\mathbb{R}$", "x ∈ R"]
+  ["$x \\in \\mathbb{R}$", "x ∈ R"],
+  ["$\\log_2 8 = 3$", "log₂ 8 = 3"],
+  ["$x_{n+1} = x_n + 1$", "xₙ₊₁ = xₙ + 1"],
+  ["$\\int_0^1 x \\, dx$", "∫₀¹ x dx"],
+  ["$\\sqrt[3]{8} = 2$", "∛8 = 2"],
+  ["$x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}$", "x = (-b ± √(b²-4ac))/(2a)"],
+  ["$f(x) = \\begin{cases} 1 & x > 0 \\\\ 0 & x \\le 0 \\end{cases}$", "f(x) = 1, x > 0\n0, x ≤ 0"],
+  ["$\\partial f / \\partial x$", "∂f / ∂x"]
 ]

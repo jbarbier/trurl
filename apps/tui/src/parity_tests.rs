@@ -298,3 +298,72 @@ fn ctrl_n_during_an_answer_asks_first() {
     let s = flat(&screen(&ui, 100, 30));
     assert!(s.contains("The answer so far will be lost."), "{s}");
 }
+
+#[test]
+fn a_question_about_the_editor_is_drawn_on_top_of_it() {
+    let mut ui = Ui::new();
+    ready(&mut ui);
+    ui.screen = Screen::Settings;
+    ui.prompt = Some((
+        PromptKind::SystemPrompt,
+        crate::text::Editor::with("You are teaching me."),
+    ));
+    ui.confirm = Some(Confirm::DiscardSystemPrompt);
+    for (w, h) in [(80, 24), (120, 34)] {
+        let s = flat(&screen(&ui, w, h));
+        assert!(s.contains("Leave without saving?"), "{w}x{h}: {s}");
+        assert!(s.contains("Enter yes") || s.contains("Enter: leave"), "{w}x{h}: {s}");
+    }
+}
+
+#[test]
+fn search_results_scroll_to_the_selection() {
+    let mut ui = Ui::new();
+    ready(&mut ui);
+    ui.screen = Screen::Hub;
+    ui.hub_view = HubView::Search;
+    ui.hub_focus = HubFocus::Results;
+    ui.hub_results = (0..30)
+        .map(|i| trurl_core::hub::RepoHit {
+            id: format!("someone/model-{i:02}-GGUF"),
+            downloads: 324_976,
+            likes: 1,
+            gated: false,
+            updated: None,
+            chat: Some(true),
+        })
+        .collect();
+    ui.hub_sel = 25;
+    let s = flat(&screen(&ui, 80, 24));
+    assert!(s.contains("› someone/model-25-GGUF"), "{s}");
+    assert!(s.contains("more above"), "{s}");
+    assert!(s.contains("324,976"), "thousands separators: {s}");
+}
+
+#[test]
+fn hugging_face_warnings_wrap_at_80_columns() {
+    let mut ui = Ui::new();
+    ready(&mut ui);
+    ui.screen = Screen::Hub;
+    ui.hub_view = HubView::Details;
+    ui.hub_details = Some(trurl_core::hub::RepoFiles {
+        id: "Qwen/Qwen3-Embedding-0.6B-GGUF".into(),
+        author: Some("Qwen".into()),
+        revision: "abc".into(),
+        gated: false,
+        license: None,
+        downloads: 1000,
+        likes: 5,
+        updated: None,
+        base_model: None,
+        architecture: None,
+        context_length: None,
+        parameters: None,
+        tags: vec![],
+        chat: Some(false),
+        readme: None,
+        files: vec![],
+    });
+    let s = flat(&screen(&ui, 80, 24));
+    assert!(s.contains("Look for a model whose name ends in Instruct or Chat."), "{s}");
+}

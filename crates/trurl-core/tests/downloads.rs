@@ -783,3 +783,16 @@ async fn a_job_file_from_a_newer_trurl_still_loads() {
     assert_eq!(again.list().len(), 1);
     assert!(part_len(&s, &id) >= 500_000);
 }
+
+/// A file already in the models folder is not downloaded again as "-2.gguf".
+#[tokio::test]
+async fn a_model_already_here_is_not_downloaded_twice() {
+    let s = setup(Mode::Good).await;
+    s.downloads.start(s.req.clone()).unwrap();
+    let name = wait_done(&s).await.unwrap();
+    assert_installed(&s, &name);
+    let again = s.downloads.start(s.req.clone()).unwrap_err();
+    assert_eq!(again.title, "This model is already on this computer.");
+    let count = std::fs::read_dir(s.models.path()).unwrap().count();
+    assert_eq!(count, 1, "no second copy");
+}

@@ -100,12 +100,21 @@ pub fn draw(f: &mut Frame, ui: &Ui) {
         Screen::Token => draw_token(f, ui, main),
     }
     draw_footer(f, ui, rows[i + 1]);
-    if let Some(c) = &ui.confirm {
-        draw_confirm(f, c, area);
-    }
     if let Some((kind, ed)) = &ui.prompt {
         draw_prompt(f, *kind, ed, area);
     }
+    // Last, so a question about the editor ("leave without saving?") is on top of it.
+    if let Some(c) = &ui.confirm {
+        draw_confirm(f, c, area);
+    }
+}
+
+/// First row to show so that row `sel` is visible in a window of `height` rows.
+fn window_start(len: usize, sel: usize, height: usize) -> usize {
+    if height == 0 || len <= height {
+        return 0;
+    }
+    sel.saturating_sub(height - 1).min(len - height)
 }
 
 fn draw_top(f: &mut Frame, ui: &Ui, area: Rect) {
@@ -211,78 +220,91 @@ fn draw_footer(f: &mut Frame, ui: &Ui, area: Rect) {
             .as_ref()
             .is_some_and(|e| e.code == trurl_core::ErrorCode::ContextFull)
     });
-    let keys: Vec<(&str, &str, bool)> = match ui.screen {
-        Screen::Chat if ui.generating => vec![
-            ("Esc", "stop", true),
-            ("Ctrl+T", "thinking", false),
-            ("PgUp/PgDn", "scroll", false),
-            ("F1", "keys", true),
-        ],
-        Screen::Chat => {
-            let mut k = vec![("Enter", "send", true)];
-            if ran_out {
-                k.push(("F5", "bigger context", true));
-            }
-            k.extend([
-                ("F6", "copy answer", false),
-                ("Ctrl+N", "new chat", false),
-                ("F2", "models", false),
-                ("F3", "settings", false),
-                ("F4", "Hugging Face", false),
-                ("Alt+Enter", "new line", false),
+    let keys: Vec<(&str, &str, bool)> = if ui.confirm.is_some() {
+        vec![("Enter", "yes", true), ("Esc", "no", true)]
+    } else if let Some((kind, _)) = &ui.prompt {
+        match kind {
+            PromptKind::SystemPrompt => vec![
+                ("Ctrl+S", "save", true),
+                ("Enter", "new line", true),
+                ("Esc", "close", true),
+            ],
+            PromptKind::ImportPath => vec![("Enter", "import", true), ("Esc", "cancel", true)],
+        }
+    } else {
+        match ui.screen {
+            Screen::Chat if ui.generating => vec![
+                ("Esc", "stop", true),
+                ("Ctrl+T", "thinking", false),
+                ("PgUp/PgDn", "scroll", false),
                 ("F1", "keys", true),
-                ("Ctrl+Q", "quit", true),
-            ]);
-            k
+            ],
+            Screen::Chat => {
+                let mut k = vec![("Enter", "send", true)];
+                if ran_out {
+                    k.push(("F5", "bigger context", true));
+                }
+                k.extend([
+                    ("F6", "copy answer", false),
+                    ("Ctrl+N", "new chat", false),
+                    ("F2", "models", false),
+                    ("F3", "settings", false),
+                    ("F4", "Hugging Face", false),
+                    ("Alt+Enter", "new line", false),
+                    ("F1", "keys", true),
+                    ("Ctrl+Q", "quit", true),
+                ]);
+                k
+            }
+            Screen::Settings => vec![
+                ("↑↓", "choose", true),
+                ("←→", "change", true),
+                ("Enter", "edit or apply", true),
+                ("R", "reset", false),
+                ("Esc", "back", true),
+            ],
+            Screen::Models => vec![
+                ("↑↓", "choose", true),
+                ("Enter", "use", true),
+                ("D", "delete", false),
+                ("I", "import", false),
+                ("F4", "Hugging Face", false),
+                ("Esc", "back", true),
+            ],
+            Screen::Hub => match ui.hub_focus {
+                HubFocus::Downloads => vec![
+                    ("P", "pause or resume", true),
+                    ("X", "cancel", true),
+                    ("Tab", "move", true),
+                    ("Esc", "back", true),
+                ],
+                HubFocus::Input => vec![
+                    ("Enter", "search", true),
+                    ("Tab", "go to the list", true),
+                    ("Esc", "back", true),
+                ],
+                _ => vec![
+                    ("Enter", "open / download", true),
+                    ("Tab", "move", true),
+                    ("Esc", "back", true),
+                ],
+            },
+            Screen::About if ui.license_open.is_some() => {
+                vec![("PgUp/PgDn", "scroll", true), ("Esc", "back", true)]
+            }
+            Screen::About => vec![
+                ("↑↓", "license", true),
+                ("Enter", "read", true),
+                ("PgUp/PgDn", "scroll", false),
+                ("U", "updates", false),
+                ("Esc", "back", true),
+            ],
+            Screen::Token => vec![
+                ("Enter", "save", true),
+                ("Ctrl+D", "remove", true),
+                ("Esc", "back", true),
+            ],
         }
-        Screen::Settings => vec![
-            ("↑↓", "choose", true),
-            ("←→", "change", true),
-            ("Enter", "edit or apply", true),
-            ("R", "reset", false),
-            ("Esc", "back", true),
-        ],
-        Screen::Models => vec![
-            ("↑↓", "choose", true),
-            ("Enter", "use", true),
-            ("D", "delete", false),
-            ("I", "import", false),
-            ("F4", "Hugging Face", false),
-            ("Esc", "back", true),
-        ],
-        Screen::Hub => match ui.hub_focus {
-            HubFocus::Downloads => vec![
-                ("P", "pause or resume", true),
-                ("X", "cancel", true),
-                ("Tab", "move", true),
-                ("Esc", "back", true),
-            ],
-            HubFocus::Input => vec![
-                ("Enter", "search", true),
-                ("Tab", "go to the list", true),
-                ("Esc", "back", true),
-            ],
-            _ => vec![
-                ("Enter", "open / download", true),
-                ("Tab", "move", true),
-                ("Esc", "back", true),
-            ],
-        },
-        Screen::About if ui.license_open.is_some() => {
-            vec![("PgUp/PgDn", "scroll", true), ("Esc", "back", true)]
-        }
-        Screen::About => vec![
-            ("↑↓", "license", true),
-            ("Enter", "read", true),
-            ("PgUp/PgDn", "scroll", false),
-            ("U", "updates", false),
-            ("Esc", "back", true),
-        ],
-        Screen::Token => vec![
-            ("Enter", "save", true),
-            ("Ctrl+D", "remove", true),
-            ("Esc", "back", true),
-        ],
     };
     let width = |ks: &[(&str, &str, bool)]| -> usize {
         ks.iter()
@@ -762,7 +784,19 @@ fn draw_models(f: &mut Frame, ui: &Ui, area: Rect) {
         };
         let mut s = vec![
             Span::styled(if sel { "› " } else { "  " }, st),
-            Span::styled(format!("{:<30}", m.name), st),
+            // Two models with one name (an import and a download of the same
+            // model): the file name tells them apart.
+            Span::styled(
+                format!(
+                    "{:<30}",
+                    if ui.models.iter().filter(|o| o.name == m.name).count() > 1 {
+                        format!("{} ({})", m.name, m.file)
+                    } else {
+                        m.name.clone()
+                    }
+                ),
+                st,
+            ),
         ];
         s.push(Span::raw(format!(
             " {:<8} {:>8}  ",
@@ -933,7 +967,19 @@ fn draw_hub(f: &mut Frame, ui: &Ui, area: Rect) {
             } else if ui.hub_results.is_empty() {
                 l.push(Line::from(Span::styled("Type a name, for example: qwen3 0.6b, gemma 3 1b, llama 3.2 1b. Then press Enter.", Style::default().fg(DIM))));
             }
-            for (i, h) in ui.hub_results.iter().enumerate() {
+            let mut dl: Vec<Line> = Vec::new();
+            downloads_lines(ui, &mut dl, true);
+            let room = (rows[1].height as usize)
+                .saturating_sub(2 + dl.len() + 2)
+                .max(3);
+            let start = window_start(ui.hub_results.len(), ui.hub_sel, room);
+            if start > 0 {
+                l.push(Line::from(Span::styled(
+                    format!("  ↑ {start} more above"),
+                    Style::default().fg(DIM),
+                )));
+            }
+            for (i, h) in ui.hub_results.iter().enumerate().skip(start).take(room) {
                 let sel = i == ui.hub_sel && ui.hub_focus == HubFocus::Results;
                 let st = if sel {
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
@@ -946,8 +992,8 @@ fn draw_hub(f: &mut Frame, ui: &Ui, area: Rect) {
                     Span::styled(
                         format!(
                             " {:>9} downloads  {:>5} likes  {}",
-                            h.downloads,
-                            h.likes,
+                            thousands(h.downloads),
+                            thousands(h.likes),
                             h.updated.as_deref().unwrap_or("").get(..10).unwrap_or("")
                         ),
                         Style::default().fg(DIM),
@@ -956,10 +1002,25 @@ fn draw_hub(f: &mut Frame, ui: &Ui, area: Rect) {
                         if h.gated { "  needs an account" } else { "" },
                         Style::default().fg(Color::Yellow),
                     ),
+                    Span::styled(
+                        if h.chat == Some(false) {
+                            "  does not chat"
+                        } else {
+                            ""
+                        },
+                        Style::default().fg(Color::Yellow),
+                    ),
                 ]));
             }
+            let more = ui.hub_results.len().saturating_sub(start + room);
+            if more > 0 {
+                l.push(Line::from(Span::styled(
+                    format!("  ↓ {more} more below"),
+                    Style::default().fg(DIM),
+                )));
+            }
             l.push(Line::from(""));
-            downloads_lines(ui, &mut l, true);
+            l.extend(dl);
             f.render_widget(Paragraph::new(l).block(block("Results")), rows[1]);
         }
         HubView::Details => draw_hub_details(f, ui, area),
@@ -992,10 +1053,13 @@ fn draw_hub_details(f: &mut Frame, ui: &Ui, area: Rect) {
     if let Some(u) = d.updated.as_deref().and_then(|u| u.get(..10)) {
         facts.push(format!("updated {u}"));
     }
-    head.push(Line::from(Span::styled(
-        facts.join(" · "),
+    let w = area.width.saturating_sub(2) as usize;
+    head.extend(wrap_plain(
+        &facts.join(" · "),
+        w,
         Style::default().fg(DIM),
-    )));
+        Span::raw(""),
+    ));
     if let Some(b) = &d.base_model {
         head.push(Line::from(Span::styled(
             format!("Based on {b}"),
@@ -1009,17 +1073,34 @@ fn draw_hub_details(f: &mut Frame, ui: &Ui, area: Rect) {
         )));
     }
     if d.chat == Some(false) {
-        head.push(Line::from(Span::styled(
+        head.extend(wrap_plain(
             "This model does not chat: it turns text into numbers, or works with sound. Look for a model whose name ends in Instruct or Chat.",
+            w,
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Span::raw(""),
+        ));
+    }
+    head.extend(wrap_plain(
+        "Each file is the same model at a different size. Q4_K_M (listed first) is small and good: the one to pick. Q8_0 is twice the size, a little more exact. IQ and UD names are other ways of squeezing.",
+        w,
+        Style::default().fg(DIM),
+        Span::raw(""),
+    ));
+    head.push(Line::from(""));
+    let mut dl: Vec<Line> = Vec::new();
+    downloads_lines(ui, &mut dl, true);
+    // The file list scrolls: never more than it can show, always the selection.
+    let files_room = (area.height as usize)
+        .saturating_sub(head.len() + dl.len() + 2 + 6)
+        .clamp(3, 10);
+    let fstart = window_start(d.files.len(), ui.hub_file_sel, files_room);
+    if fstart > 0 {
+        head.push(Line::from(Span::styled(
+            format!("  ↑ {fstart} more above"),
+            Style::default().fg(DIM),
         )));
     }
-    head.push(Line::from(Span::styled(
-        "Each file is the same model at a different size. Q4_K_M is small and good: the one to pick. Q8_0 is twice the size, a little more exact.",
-        Style::default().fg(DIM),
-    )));
-    head.push(Line::from(""));
-    for (i, file) in d.files.iter().enumerate() {
+    for (i, file) in d.files.iter().enumerate().skip(fstart).take(files_room) {
         let sel = i == ui.hub_file_sel && ui.hub_focus == HubFocus::Files;
         let st = if sel {
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
@@ -1029,7 +1110,10 @@ fn draw_hub_details(f: &mut Frame, ui: &Ui, area: Rect) {
         let mut s = vec![
             Span::styled(if sel { "› " } else { "  " }, st),
             Span::styled(
-                format!("{:<8} ", file.quant.clone().unwrap_or_else(|| "?".into())),
+                format!(
+                    "{:<8} ",
+                    file.quant.clone().unwrap_or_else(|| "full".into())
+                ),
                 st,
             ),
             Span::styled(format!("{:>8}  ", human_size(file.size)), st),
@@ -1063,9 +1147,16 @@ fn draw_hub_details(f: &mut Frame, ui: &Ui, area: Rect) {
         ));
         head.push(Line::from(s));
     }
+    let fmore = d.files.len().saturating_sub(fstart + files_room);
+    if fmore > 0 {
+        head.push(Line::from(Span::styled(
+            format!("  ↓ {fmore} more below"),
+            Style::default().fg(DIM),
+        )));
+    }
     head.push(Line::from(""));
-    downloads_lines(ui, &mut head, true);
-    let head_h = (head.len() as u16 + 2).min(area.height / 2 + 4);
+    head.extend(dl);
+    let head_h = (head.len() as u16 + 2).min(area.height.saturating_sub(5));
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(head_h), Constraint::Min(3)])
@@ -1171,10 +1262,24 @@ fn draw_about(f: &mut Frame, ui: &Ui, area: Rect) {
         ("F12", "Hugging Face token (only for gated models)"),
         ("Ctrl+Q", "quit"),
     ] {
-        l.push(Line::from(vec![
-            Span::styled(format!("  {k:<32}"), Style::default().fg(ACCENT)),
-            Span::raw(v),
-        ]));
+        let w = area.width.saturating_sub(2) as usize;
+        if w >= 34 + 30 {
+            l.extend(wrap(
+                vec![
+                    Span::styled(format!("{k:<32}"), Style::default().fg(ACCENT)),
+                    Span::raw(v),
+                ],
+                w,
+                Span::raw("  "),
+            ));
+        } else {
+            // Narrow: the key on its line, what it does indented under it.
+            l.push(Line::from(Span::styled(
+                format!("  {k}"),
+                Style::default().fg(ACCENT),
+            )));
+            l.extend(wrap_plain(v, w, Style::default(), Span::raw("      ")));
+        }
     }
     l.push(Line::from(""));
     if let Some(h) = &ui.hardware {
@@ -1205,6 +1310,7 @@ fn draw_about(f: &mut Frame, ui: &Ui, area: Rect) {
         "Licenses",
         Style::default().add_modifier(Modifier::BOLD),
     )));
+    let first_license_line = l.len();
     for (i, lic) in licenses.iter().enumerate() {
         let sel = i == ui.license_sel;
         l.push(Line::from(Span::styled(
@@ -1216,10 +1322,19 @@ fn draw_about(f: &mut Frame, ui: &Ui, area: Rect) {
             },
         )));
     }
+    // The selected license is always on screen (↑↓ move it; PgUp/PgDn scroll).
+    let visible = area.height.saturating_sub(2) as usize;
+    let sel_line = first_license_line + ui.license_sel;
+    let mut scroll = ui.about_scroll as usize;
+    // Only once the learner moves through the licenses: F1 opens at the top.
+    if ui.license_sel > 0 && sel_line >= scroll + visible {
+        scroll = sel_line + 1 - visible;
+    }
+    let scroll = scroll.min(l.len().saturating_sub(1)) as u16;
     f.render_widget(
         Paragraph::new(l)
             .wrap(Wrap { trim: false })
-            .scroll((ui.about_scroll, 0))
+            .scroll((scroll, 0))
             .block(block("About Trurl (PgUp/PgDn to scroll)")),
         area,
     );
@@ -1261,10 +1376,10 @@ fn draw_token(f: &mut Frame, ui: &Ui, area: Rect) {
 
 fn draw_confirm(f: &mut Frame, c: &Confirm, area: Rect) {
     let (title, body, yes) = match c {
-        Confirm::Delete { name, size, .. } => (
+        Confirm::Delete { name, size, file } => (
             "Delete model",
             format!(
-                "Delete {name}? This frees {} on this computer. You can import or download it again later.",
+                "Delete {name} ({file})? This frees {} on this computer. You can import or download it again later.",
                 human_size(*size)
             ),
             "Enter: delete",

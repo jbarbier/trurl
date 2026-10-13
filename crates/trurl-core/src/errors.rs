@@ -169,6 +169,26 @@ impl UserError {
         .with_detail(path.to_string())
     }
 
+    /// A folder typed where a model file was expected.
+    pub fn import_folder(path: &str) -> Self {
+        Self::new(
+            ErrorCode::ImportFailed,
+            "That is a folder.",
+            "Type the path of a .gguf file inside it.",
+        )
+        .with_detail(path.to_string())
+    }
+
+    /// A download of a file the models folder already has.
+    pub fn already_have(file: &str) -> Self {
+        Self::new(
+            ErrorCode::DownloadFailed,
+            "This model is already on this computer.",
+            "Choose it in Models. To download it again, delete it there first.",
+        )
+        .with_detail(file.to_string())
+    }
+
     pub fn busy() -> Self {
         Self::new(
             ErrorCode::Busy,
@@ -371,6 +391,8 @@ mod tests {
             UserError::context_full_first(),
             UserError::message_too_long(),
             UserError::import_missing("/x.gguf"),
+            UserError::import_folder("/media/usb"),
+            UserError::already_have("x.gguf"),
             UserError::busy(),
             UserError::offline(),
             UserError::hub_failed(),

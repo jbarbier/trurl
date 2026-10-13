@@ -12,7 +12,7 @@ ON A WINDOWS 10 OR 11 COMPUTER
    see "Smart App Control" in docs/USB-BUNDLE.md on the Trurl GitHub page
    before you change anything.
 3. Read the licenses, click "I Agree", then "Install". The installer copies the
-   models from the "models" folder: this takes 2 to 6 minutes. Do not remove the
+   models from the "models" folder: this takes a few minutes, depending on the stick. Do not remove the
    stick until it says it is finished.
 4. Open Trurl from the Start menu.
 

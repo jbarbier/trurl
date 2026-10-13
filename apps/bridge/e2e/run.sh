@@ -16,8 +16,9 @@ gcc -shared -fPIC -O2 -o target/netblock.so scripts/netblock.c -ldl
 
 run_suite() { # suite port preload
   local suite=$1 port=$2 preload=$3
-  local home
-  home=$(mktemp -d)
+  # A fixed, readable folder: screenshots show its path (the Models screen).
+  local home="/tmp/trurl-$suite"
+  rm -rf "$home" && mkdir -p "$home"
   mkdir -p "$home/models"
   ln "$MODELS/gemma-3-1b-it-Q4_K_M.gguf" "$home/models/" 2>/dev/null || cp "$MODELS/gemma-3-1b-it-Q4_K_M.gguf" "$home/models/"
   ln "$MODELS/Qwen_Qwen3-0.6B-Q4_K_M.gguf" "$home/models/" 2>/dev/null || cp "$MODELS/Qwen_Qwen3-0.6B-Q4_K_M.gguf" "$home/models/"

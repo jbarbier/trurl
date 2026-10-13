@@ -13,10 +13,13 @@
     to: "→", rightarrow: "→", Rightarrow: "⇒", implies: "⇒", leftarrow: "←", iff: "⇔",
     ldots: "…", dots: "…", cdots: "…", degree: "°", circ: "°", percent: "%",
     sum: "Σ", prod: "Π", in: "∈", cup: "∪", cap: "∩", forall: "∀", exists: "∃",
+    int: "∫", iint: "∬", oint: "∮", partial: "∂", nabla: "∇", cdotp: "·",
     lfloor: "⌊", rfloor: "⌋", lceil: "⌈", rceil: "⌉", angle: "∠", triangle: "△",
     perp: "⊥", parallel: "∥", therefore: "∴", notin: "∉", subset: "⊂", emptyset: "∅",
     quad: " ", qquad: "  ", ",": " ", ";": " ", "!": "", " ": " ",
   };
+  const SUB = { 0: "₀", 1: "₁", 2: "₂", 3: "₃", 4: "₄", 5: "₅", 6: "₆", 7: "₇", 8: "₈", 9: "₉", "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎",
+    a: "ₐ", e: "ₑ", o: "ₒ", x: "ₓ", h: "ₕ", k: "ₖ", l: "ₗ", m: "ₘ", n: "ₙ", p: "ₚ", s: "ₛ", t: "ₜ", i: "ᵢ", j: "ⱼ", r: "ᵣ", u: "ᵤ", v: "ᵥ" };
   const SUP = { 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹", "+": "⁺", "-": "⁻", n: "ⁿ" };
 
   // The content of the {group} starting at s[i] === "{", and the index after it.
@@ -31,6 +34,17 @@
 
   function needsParens(x) {
     return /[+\-×÷·/ ]/.test(x.trim()) && !/^\(.*\)$/.test(x.trim());
+  }
+
+  function sub(x) {
+    const chars = [...x];
+    return chars.every((c) => SUB[c]) ? chars.map((c) => SUB[c]).join("") : x;
+  }
+
+  // A denominator like "2a" needs brackets too: 1/2a reads as half of a.
+  function needsParensBelow(x) {
+    const t = x.trim();
+    return needsParens(t) || ([...t].length > 1 && !/^[0-9.]+$/.test(t) && !/^[A-Za-zα-ω]$/.test(t));
   }
 
   function sup(x) {
@@ -57,7 +71,7 @@
           if (src[i] === "{") [b, i] = group(src, i);
           a = convert(a);
           b = convert(b);
-          out += (needsParens(a) ? "(" + a + ")" : a) + "/" + (needsParens(b) ? "(" + b + ")" : b);
+          out += (needsParens(a) ? "(" + a + ")" : a) + "/" + (needsParensBelow(b) ? "(" + b + ")" : b);
         } else if (name === "binom") {
           let a = "", b = "";
           if (src[i] === "{") [a, i] = group(src, i);
@@ -70,9 +84,16 @@
           out += "\n";
         } else if (name === "sqrt") {
           let a = "";
+          let root = "";
+          if (src[i] === "[") {
+            const close = src.indexOf("]", i);
+            root = close > i ? src.slice(i + 1, close).trim() : "";
+            i = close > i ? close + 1 : i + 1;
+          }
           if (src[i] === "{") [a, i] = group(src, i);
+          out += root === "3" ? "∛" : root === "4" ? "∜" : root ? sup(convert(root)) : "";
           a = convert(a);
-          out += "√" + (needsParens(a) ? "(" + a + ")" : a);
+          out += (root === "3" || root === "4" ? "" : "√") + (needsParens(a) ? "(" + a + ")" : a);
         } else if (["boxed", "text", "textbf", "mathrm", "mathbf", "mathbb", "mathcal", "vec", "hat", "bar", "overline", "operatorname", "mbox", "textit", "mathit"].includes(name)) {
           let a = "";
           if (src[i] === "{") [a, i] = group(src, i);
@@ -83,6 +104,8 @@
           out += name;
         } else if (name in SYMBOLS) {
           out += SYMBOLS[name];
+          // ∂f, ∇f, ∫x, Σi: these read as one with what follows.
+          if (["partial", "nabla", "int", "iint", "oint", "sum", "prod"].includes(name)) while (src[i] === " ") i++;
         } else {
           out += name;
         }
@@ -103,10 +126,13 @@
         let a;
         if (src[i] === "{") [a, i] = group(src, i);
         else a = src[i++] || "";
-        out += convert(a);
+        out += sub(convert(a));
       } else if (c === "{" || c === "}") {
         i++;
       } else if (c === "&") {
+        // Alignment: "x &= 2" is "x = 2"; in cases, "1 & x > 0" is "1, x > 0".
+        const next = src.slice(i + 1).trimStart()[0];
+        out += next && "=<>≤≥".includes(next) ? "" : ", ";
         i++;
       } else {
         out += c;
@@ -117,6 +143,7 @@
       .replace(/([([{⌊⌈])[ \t]+/g, "$1")
       .replace(/[ \t]+([)\]}⌋⌉])/g, "$1")
       .replace(/ *\n */g, "\n")
+      .replace(/ +,/g, ",")
       .replace(/ {2,}/g, " ")
       .trim();
   }

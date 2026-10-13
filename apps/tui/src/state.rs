@@ -267,7 +267,11 @@ impl Ui {
                     self.notice = Some(e);
                 } else if let Some(f) = file {
                     self.notice = None;
-                    self.say(format!("Imported {f}. Press F2 to use it."));
+                    self.say(if self.screen == Screen::Models {
+                        format!("Imported {f}. It is in the list: Enter uses it.")
+                    } else {
+                        format!("Imported {f}. Press F2 to use it.")
+                    });
                 }
             }
             Event::VerifyProgress { file, done, total } => {
@@ -289,6 +293,13 @@ impl Ui {
                     .map(|old| old.dest_file.clone())
                     .collect();
                 for f in finished {
+                    let f = self
+                        .models
+                        .iter()
+                        .rev()
+                        .find(|m| m.file.starts_with(f.trim_end_matches(".gguf")))
+                        .map(|m| m.file.clone())
+                        .unwrap_or(f);
                     self.say(format!("Downloaded {f}. Press F2 to use it."));
                 }
                 self.downloads = downloads;

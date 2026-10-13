@@ -159,6 +159,56 @@ fn needs_parens(x: &str) -> bool {
     t.contains(['+', '-', '×', '÷', '·', '/', ' ']) && !(t.starts_with('(') && t.ends_with(')'))
 }
 
+fn sub(x: &str) -> String {
+    let m = |c: char| {
+        Some(match c {
+            '0' => '₀',
+            '1' => '₁',
+            '2' => '₂',
+            '3' => '₃',
+            '4' => '₄',
+            '5' => '₅',
+            '6' => '₆',
+            '7' => '₇',
+            '8' => '₈',
+            '9' => '₉',
+            '+' => '₊',
+            '-' => '₋',
+            '=' => '₌',
+            '(' => '₍',
+            ')' => '₎',
+            'a' => 'ₐ',
+            'e' => 'ₑ',
+            'o' => 'ₒ',
+            'x' => 'ₓ',
+            'h' => 'ₕ',
+            'k' => 'ₖ',
+            'l' => 'ₗ',
+            'm' => 'ₘ',
+            'n' => 'ₙ',
+            'p' => 'ₚ',
+            's' => 'ₛ',
+            't' => 'ₜ',
+            'i' => 'ᵢ',
+            'j' => 'ⱼ',
+            'r' => 'ᵣ',
+            'u' => 'ᵤ',
+            'v' => 'ᵥ',
+            _ => return None,
+        })
+    };
+    x.chars()
+        .map(m)
+        .collect::<Option<String>>()
+        .unwrap_or_else(|| x.to_string())
+}
+
+/// A denominator like "2a" needs brackets too: 1/2a reads as half of a.
+fn needs_parens_below(x: &str) -> bool {
+    let t = x.trim();
+    needs_parens(t) || (t.chars().count() > 1 && !t.chars().all(|c| c.is_ascii_digit() || c == '.'))
+}
+
 fn sup(x: &str) -> String {
     let m = |c: char| match c {
         '0' => Some('⁰'),
@@ -221,6 +271,11 @@ fn symbol(name: &str) -> Option<&'static str> {
         "cap" => "∩",
         "forall" => "∀",
         "exists" => "∃",
+        "int" => "∫",
+        "iint" => "∬",
+        "oint" => "∮",
+        "partial" => "∂",
+        "nabla" => "∇",
         "lfloor" => "⌊",
         "rfloor" => "⌋",
         "lceil" => "⌈",
@@ -308,7 +363,12 @@ fn convert(src: &str) -> String {
                             x.to_string()
                         }
                     };
-                    out.push_str(&format!("{}/{}", p(&a), p(&d)));
+                    let below = if needs_parens_below(&d) {
+                        format!("({d})")
+                    } else {
+                        d.clone()
+                    };
+                    out.push_str(&format!("{}/{}", p(&a), below));
                 }
                 "binom" => {
                     let a = convert(&arg(&mut i));
@@ -321,8 +381,23 @@ fn convert(src: &str) -> String {
                 }
                 "\\" => out.push('\n'),
                 "sqrt" => {
+                    let mut root = String::new();
+                    if b.get(i) == Some(&'[')
+                        && let Some(c) = (i + 1..b.len()).find(|&k| b[k] == ']')
+                    {
+                        root = b[i + 1..c].iter().collect::<String>().trim().to_string();
+                        i = c + 1;
+                    }
                     let a = convert(&arg(&mut i));
-                    out.push('√');
+                    match root.as_str() {
+                        "" => out.push('√'),
+                        "3" => out.push('∛'),
+                        "4" => out.push('∜'),
+                        r => {
+                            out.push_str(&sup(&convert(r)));
+                            out.push('√');
+                        }
+                    }
                     out.push_str(&if needs_parens(&a) {
                         format!("({a})")
                     } else {
@@ -337,7 +412,15 @@ fn convert(src: &str) -> String {
                 }
                 "left" | "right" | "big" | "Big" | "displaystyle" => {}
                 "{" | "}" | "%" | "$" | "#" | "&" | "_" => out.push_str(&name),
-                n => out.push_str(symbol(n).unwrap_or(n)),
+                n => {
+                    out.push_str(symbol(n).unwrap_or(n));
+                    // ∂f, ∇f, ∫x, Σi: these read as one with what follows.
+                    if ["partial", "nabla", "int", "iint", "oint", "sum", "prod"].contains(&n) {
+                        while b.get(i) == Some(&' ') {
+                            i += 1;
+                        }
+                    }
+                }
             }
         } else if c == '^' || c == '_' {
             i += 1;
@@ -364,8 +447,21 @@ fn convert(src: &str) -> String {
                 s
             };
             let a = convert(&a);
-            out.push_str(&if c == '^' && a != "°" { sup(&a) } else { a });
-        } else if c == '{' || c == '}' || c == '&' {
+            out.push_str(&if c == '^' && a != "°" {
+                sup(&a)
+            } else if c == '_' {
+                sub(&a)
+            } else {
+                a
+            });
+        } else if c == '&' {
+            // Alignment: "x &= 2" is "x = 2"; in cases, "1 & x > 0" is "1, x > 0".
+            let next = b[i + 1..].iter().find(|c| !c.is_whitespace());
+            if !next.is_some_and(|c| "=<>≤≥".contains(*c)) {
+                out.push_str(", ");
+            }
+            i += 1;
+        } else if c == '{' || c == '}' {
             i += 1;
         } else {
             out.push(c);
@@ -378,7 +474,7 @@ fn convert(src: &str) -> String {
         if ch == ' ' && (t.ends_with([' ', '\n']) || t.ends_with(['(', '[', '{', '⌊', '⌈'])) {
             continue;
         }
-        if matches!(ch, ')' | ']' | '}' | '⌋' | '⌉' | '\n') && t.ends_with(' ') {
+        if matches!(ch, ')' | ']' | '}' | '⌋' | '⌉' | '\n' | ',') && t.ends_with(' ') {
             t.pop();
         }
         t.push(ch);

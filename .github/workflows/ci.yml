@@ -62,7 +62,7 @@ jobs:
             vendor/llama
             ${{ env.TRURL_TEST_MODELS }}
           key: llama-models-linux-${{ hashFiles('pins.json', 'scripts/build_llama.py') }}
-      - run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build tmux
       - run: rustup toolchain install
       - name: Build llama-server (avx2, avx, compat)
         run: test -x vendor/llama/linux/compat/llama-server || python3 scripts/build_llama.py
@@ -76,6 +76,10 @@ jobs:
         run: bash scripts/run_evals.sh
       - name: UI end-to-end (bridge + Chromium at 1366x768)
         run: bash apps/bridge/e2e/run.sh
+      - name: Terminal app end to end (real trurl in tmux, network blocked, crash stops llama-server)
+        run: |
+          cargo build --release --locked -p trurl-tui
+          python3 scripts/tui_smoke.py --models "$TRURL_TEST_MODELS" --netblock "$PWD/target/netblock.so"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

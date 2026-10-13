@@ -195,6 +195,11 @@ it for all the keys, or see [packaging/linux/README.txt](packaging/linux/README.
 | Windows 7, 8.1 | ❌ Microsoft's WebView2, which draws the window, ended support | not built yet |
 | Linux, glibc 2.31+ (Ubuntu 20.04+, Debian 11+, Mint 20+) | not shipped | ✅ |
 
+**Today a Windows 7 or 8.1 computer cannot run Trurl at all.** The window needs
+Windows 10 or 11, and the terminal app is not built for Windows yet. A terminal
+build for old Windows is the planned way to reach them. The Linux build is checked
+on every release to need nothing newer than glibc 2.31 (`scripts/check_glibc.py`).
+
 **CPU:** any 64-bit Intel or AMD. Trurl picks the fastest of its three model engines
 when it starts:
 
@@ -209,7 +214,9 @@ If a computer cannot run the engine Trurl picked, Trurl moves down a level by it
 **Memory:** 4 GB runs Gemma 3 1B and Qwen3 0.6B. 8 GB also runs Gemma 3 4B. No
 graphics card is needed.
 
-**Disk:** about 60 MB for Trurl, plus the models: 0.5 to 2.5 GB each.
+**Disk:** about 55 MB for Trurl on Linux and about 35 MB installed on Windows, plus
+the models: 0.5 to 2.5 GB each. The Windows installer is 12 MB; the USB installer is
+227 MB because it carries WebView2 for computers that lack it.
 
 ## Benchmarks
 
@@ -218,7 +225,7 @@ to run it offline. Method and raw numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.
 
 **What it means on a learner's laptop:**
 
-- **Smallest by far.** Trurl is about 50 MB on disk, 40 times smaller than Ollama:
+- **Smallest by far.** Trurl is about 55 MB on disk, 40 times smaller than Ollama:
   it fits on any old laptop and on the USB stick with its models.
 - **Starts in about 2 seconds,** several times faster than Ollama.
 - **Keeps working when memory runs out.** With only 500 MB of memory left for
@@ -229,12 +236,11 @@ to run it offline. Method and raw numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.
   llamafile is slower.
 - **Uses nothing while it waits:** 0% CPU between questions.
 - **Memory** is within a few percent for all three: almost all of it is the model.
-  Trurl's own process adds about 35 MB.
-- **The Windows window** (measured by the Windows smoke test in CI, after one
-  answer with Gemma 3 1B): llama-server 941 MB with the model mapped (277 MB of it
-  private), Microsoft's WebView2 302 MB (108 MB private, its libraries are shared
-  with Edge), `trurl.exe` 25 MB. The window costs about 115 MB of private memory on
-  top of the model; the terminal app costs about 35 MB.
+- **The Windows window** (printed by the Windows smoke test in CI, after one answer
+  with Gemma 3 1B): llama-server about 940 MB with the model mapped (about 280 MB
+  of it private), Microsoft's WebView2 about 300 MB (about 110 MB private: its
+  libraries are shared with Edge), `trurl.exe` about 25 MB. The window costs about
+  115 MB of private memory on top of the model.
 
 <!-- benchmarks:start -->
 | | App on disk | Load time | First word | Speed | RAM, idle | RAM, answering | CPU, idle |
@@ -268,13 +274,13 @@ to make one, with the three models, and how to add your own.
 |---|---|
 | Temperature 0 gives the same answer twice | Slide temperature to 0.0. |
 | A pre-trained model that never stops (1.1.2) | Import its `.gguf`; it runs without a chat template; **Stop** ends it. |
-| Watch thinking live, stop it (1.2.3, 1.3.4) | Pick Qwen3 0.6B. On a laptop it often thinks for 1 to 2 minutes; **Stop** or **Esc** at any moment. |
+| Watch thinking live, stop it (1.2.3, 1.3.4) | Pick Qwen3 0.6B. On a slow computer it can think for minutes (1 to 3 on the 2-core test machine); **Stop** or **Esc** at any moment. |
 | `/no_think` (1.3.4, 1.4.3) | Type it in the message; the thinking block stays empty. |
 | Run out of context (1.3.2) | Set **Context size** to 256, the smallest. llama.cpp rounds any context up to a multiple of 256, so the course's 200 behaves exactly like 256. |
 | Paste a whole web page (1.4.3) | Set **Context size** to 4,096 first: 2,048 tokens is about 1,500 words. |
 | Warmth is a setting: two system prompts (1.4.2) | Write the first in **System prompt**, ask, press **New chat**, change the prompt, ask again. The prompt stays until you change it, for every model. |
 | A study mode written as a system prompt (1.4.x) | Same box: "You are teaching me. Never give me the answer. Ask me one question at a time." |
-| Copy an answer into your notes (1.4.4) | **Copy** under the answer. In the terminal app, select the text with the mouse. |
+| Copy an answer into your notes (1.4.4) | **Copy** under the answer. In the terminal app, **F6**: it copies the answer and adds it to `Trurl notes.txt` in Documents. |
 | Airplane mode | Everything works; only the Hugging Face tab asks for internet. |
 
 **When a model will not load,** Trurl says why in plain words. For the details, the
@@ -321,7 +327,8 @@ Trurl is a small Rust program around [llama.cpp](https://github.com/ggml-org/lla
 
 - **Starting a model.** Trurl starts `llama-server` with the model, listening only
   on this computer (127.0.0.1) and protected by a random key, and stops it when
-  Trurl closes, even if Trurl crashes.
+  Trurl closes, even if Trurl crashes (tested on Linux by killing Trurl in CI, and on
+  Windows by the smoke test, which ends Trurl the way a crash would).
 - **Low-RAM settings.** One conversation at a time, no prompt cache, threads =
   physical cores, memory-mapped weights.
 - **Chat template and reasoning.** The model's own chat template comes from its

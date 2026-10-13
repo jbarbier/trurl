@@ -329,6 +329,13 @@ impl Downloads {
         let dest_file = crate::paths::safe_model_file_name(base_name)
             .ok_or_else(|| UserError::not_gguf(base_name))?;
         let id = download_id(&req.repo, &req.file, &req.revision);
+        // Already in the models folder, same size: a second copy ("-2.gguf") would
+        // only fill the disk.
+        if let Ok(m) = std::fs::metadata(self.inner.models_dir.join(&dest_file))
+            && (req.size == 0 || m.len() == req.size)
+        {
+            return Err(UserError::already_have(&dest_file));
+        }
         std::fs::create_dir_all(&self.inner.dir)
             .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
         {
