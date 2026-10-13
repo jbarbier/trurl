@@ -66,8 +66,13 @@ OFF_ALL = ["-DGGML_SSE42=OFF", "-DGGML_AVX=OFF", "-DGGML_AVX2=OFF", "-DGGML_BMI2
 # Extra compiler flags per variant and OS, passed as CFLAGS/CXXFLAGS (CMake adds
 # them to its own defaults). MSVC compiles SSSE3 code on x64 without a switch,
 # but ggml only uses it when __SSSE3__ is defined.
+# MA_DR_FLAC_NO_SSE41: with MSVC, miniaudio (audio input for multimodal models,
+# never used by Trurl) compiles SSE4.1 versions of its FLAC decoder, picked after
+# a CPUID check. Safe, but the tiers below SSE4.1 should not contain them at all,
+# so check_cpu_isa.py can stay strict.
 VARIANT_CFLAGS = {
-    "ssse3": {"linux": "-mssse3", "windows": "/D__SSE3__ /D__SSSE3__"},
+    "ssse3": {"linux": "-mssse3", "windows": "/D__SSE3__ /D__SSSE3__ /DMA_DR_FLAC_NO_SSE41"},
+    "compat": {"windows": "/DMA_DR_FLAC_NO_SSE41"},
 }
 
 VARIANTS = {
