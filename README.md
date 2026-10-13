@@ -81,8 +81,15 @@ firewall.*
 
 Type a message and press **Enter**. **Shift+Enter** makes a new line. The answer
 appears word by word, and **Stop** (or **Esc**) cuts it short. **New chat**
-(Ctrl+N) forgets the conversation. Answers are formatted (lists, bold, code), and
+(Ctrl+N) starts a fresh conversation. Answers are formatted (lists, bold, code), and
 each one says which model wrote it, so you can compare models in one conversation.
+
+**Chats** keeps every conversation, on this computer only. Open an old one and
+carry on where you stopped: its questions and answers come back, and so do the
+system prompt, temperature, context size and model of its last answer, so the next
+answer is written the same way. Delete one chat, or all of them (for a shared
+classroom computer). Chats are saved after each answer; nothing is ever sent
+anywhere.
 
 While a model is loading, you can already type and press Send: the message goes out
 as soon as the model is ready.
@@ -185,7 +192,7 @@ shows the version and has **Check for updates**.
 ### In a terminal (Linux)
 
 The terminal version has the same features: chat, thinking, the controls, models,
-Hugging Face search and downloads, updates, licenses. Two keys are its own: **F6**
+Hugging Face search and downloads, chats (**F9**), updates, licenses. Two keys are its own: **F6**
 copies the last answer (and adds it, with the question and settings, to a
 `Trurl notes.txt` file in your Documents folder), and **F5**, after running out of
 room, picks the next context size and puts the question back. Press **F1** inside

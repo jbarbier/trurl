@@ -6,6 +6,7 @@ use crate::chat::Turn;
 use crate::downloads::DownloadInfo;
 use crate::errors::UserError;
 use crate::hardware::{CpuVariant, RamFit};
+use crate::history::ChatSummary;
 use crate::models::ModelInfo;
 use serde::Serialize;
 
@@ -65,6 +66,9 @@ pub struct Snapshot {
     pub downloads: Vec<DownloadInfo>,
     /// The models the course uses, in course order. Fixed for a given Trurl version.
     pub course_models: Vec<CourseModel>,
+    /// Saved chats, newest first, and which one is on screen (None: a new chat).
+    pub chats: Vec<ChatSummary>,
+    pub chat_id: Option<String>,
 }
 
 /// A course model: one click downloads exactly this pinned file
@@ -130,6 +134,11 @@ pub enum Event {
         turn: Turn,
     },
     ChatCleared,
+    /// The saved chats changed (a chat was saved, deleted, or opened).
+    Chats {
+        chats: Vec<ChatSummary>,
+        chat_id: Option<String>,
+    },
     Generating {
         generating: bool,
     },

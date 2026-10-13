@@ -8,6 +8,7 @@ use trurl_core::errors::UserError;
 use trurl_core::events::{
     CourseModel, EngineState, Event, HardwareSummary, PublicSettings, Snapshot,
 };
+use trurl_core::history::ChatSummary;
 use trurl_core::hub::{RepoFiles, RepoHit};
 use trurl_core::models::ModelInfo;
 use trurl_core::update::UpdateInfo;
@@ -18,6 +19,8 @@ pub enum Screen {
     Settings,
     Models,
     Hub,
+    /// F9: the saved chats.
+    Chats,
     About,
     /// Hidden: Hugging Face token.
     Token,
@@ -36,6 +39,21 @@ pub enum Confirm {
     },
     /// Ctrl+N while the model is still answering.
     NewChat,
+    /// D on a saved chat.
+    DeleteChat {
+        id: String,
+        title: String,
+        /// It is the chat on screen and the model is answering: that answer stops.
+        stops: bool,
+    },
+    /// A on the chats screen.
+    DeleteAllChats {
+        count: usize,
+    },
+    /// Enter on a saved chat while the model is answering.
+    OpenChat {
+        id: String,
+    },
     /// Ctrl+C or Ctrl+Q with a chat on screen.
     Quit,
     /// R on the system prompt in Settings.
@@ -106,6 +124,10 @@ pub struct Ui {
     pub downloads: Vec<DownloadInfo>,
     /// The models the course uses (pins.json), first on the Hugging Face screen.
     pub course_models: Vec<CourseModel>,
+    /// Saved chats, newest first, and the one on screen (None: a new chat).
+    pub chats: Vec<ChatSummary>,
+    pub chat_id: Option<String>,
+    pub chats_sel: usize,
 
     pub screen: Screen,
     pub input: Editor,
@@ -172,6 +194,9 @@ impl Ui {
             generating: false,
             downloads: Vec::new(),
             course_models: Vec::new(),
+            chats: Vec::new(),
+            chat_id: None,
+            chats_sel: 0,
             screen: Screen::Chat,
             input: Editor::default(),
             scroll: 0,
@@ -220,6 +245,9 @@ impl Ui {
         self.generating = s.generating;
         self.downloads = s.downloads;
         self.course_models = s.course_models;
+        self.chats = s.chats;
+        self.chat_id = s.chat_id;
+        self.chats_sel = self.chats_sel.min(self.chats.len().saturating_sub(1));
     }
 
     /// The model in the folder that is this course model's exact pinned file.
@@ -323,6 +351,11 @@ impl Ui {
                 if let Some(t) = self.turns.iter_mut().find(|t| t.id == turn.id) {
                     *t = turn;
                 }
+            }
+            Event::Chats { chats, chat_id } => {
+                self.chats = chats;
+                self.chat_id = chat_id;
+                self.chats_sel = self.chats_sel.min(self.chats.len().saturating_sub(1));
             }
             Event::ChatCleared => {
                 self.turns.clear();

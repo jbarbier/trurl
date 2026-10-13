@@ -11,6 +11,7 @@ pub mod errors;
 pub mod events;
 pub mod gguf;
 pub mod hardware;
+pub mod history;
 pub mod hub;
 pub mod licenses;
 pub mod models;

@@ -37,6 +37,10 @@ pub enum ErrorCode {
     UpdateFailed,
     UpdateCheckFailed,
     UpdateBusy,
+    /// Saving or deleting a chat in the history failed.
+    ChatSave,
+    /// A chat in the history could not be read.
+    ChatOpen,
     Internal,
 }
 
@@ -286,6 +290,46 @@ impl UserError {
         )
     }
 
+    pub fn chat_save_failed() -> Self {
+        Self::new(
+            ErrorCode::ChatSave,
+            "This chat could not be saved.",
+            "Check that the disk is not full, then try again. The chat stays on screen.",
+        )
+    }
+
+    pub fn chat_delete_failed() -> Self {
+        Self::new(
+            ErrorCode::ChatSave,
+            "The chat could not be deleted.",
+            "Close Trurl, open it again, then try again.",
+        )
+    }
+
+    pub fn chat_model_gone(model: &str) -> Self {
+        Self::new(
+            ErrorCode::ModelMissing,
+            format!("{model}, the model of this chat, is not on this computer any more."),
+            "The chat goes on with the model in use. Import or download that model to use it again.",
+        )
+    }
+
+    pub fn chat_model_damaged(model: &str) -> Self {
+        Self::new(
+            ErrorCode::ModelCorrupt,
+            format!("{model}, the model of this chat, is damaged."),
+            "The chat goes on with the model in use. Delete the damaged file in Models, then import or download it again.",
+        )
+    }
+
+    pub fn chat_open_failed() -> Self {
+        Self::new(
+            ErrorCode::ChatOpen,
+            "This chat could not be opened.",
+            "The file may be damaged. Your other chats are not affected.",
+        )
+    }
+
     pub fn delete_failed(file: &str) -> Self {
         Self::new(
             ErrorCode::DeleteFailed,
@@ -407,6 +451,11 @@ mod tests {
             UserError::import_failed(),
             UserError::not_gguf("f.txt"),
             UserError::delete_failed("f.gguf"),
+            UserError::chat_save_failed(),
+            UserError::chat_delete_failed(),
+            UserError::chat_open_failed(),
+            UserError::chat_model_gone("M"),
+            UserError::chat_model_damaged("M"),
             UserError::update_failed(),
             UserError::update_check_failed(),
             UserError::update_wait_for_answer(),

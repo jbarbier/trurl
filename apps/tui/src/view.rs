@@ -96,6 +96,7 @@ pub fn draw(f: &mut Frame, ui: &Ui) {
         Screen::Settings => draw_settings(f, ui, main),
         Screen::Models => draw_models(f, ui, main),
         Screen::Hub => draw_hub(f, ui, main),
+        Screen::Chats => draw_chats(f, ui, main),
         Screen::About => draw_about(f, ui, main),
         Screen::Token => draw_token(f, ui, main),
     }
@@ -245,6 +246,7 @@ fn draw_footer(f: &mut Frame, ui: &Ui, area: Rect) {
                     k.push(("F5", "bigger context", true));
                 }
                 k.extend([
+                    ("F9", "chats", false),
                     ("F6", "copy answer", false),
                     ("Ctrl+N", "new chat", false),
                     ("F2", "models", false),
@@ -254,6 +256,18 @@ fn draw_footer(f: &mut Frame, ui: &Ui, area: Rect) {
                     ("F1", "keys", true),
                     ("Ctrl+Q", "quit", true),
                 ]);
+                k
+            }
+            Screen::Chats => {
+                let mut k = vec![
+                    ("↑↓", "choose", true),
+                    ("Enter", "open", true),
+                    ("D", "delete", false),
+                ];
+                if !ui.chats.is_empty() {
+                    k.push(("A", "delete all", false));
+                }
+                k.push(("Esc", "back", true));
                 k
             }
             Screen::Settings => vec![
@@ -1000,6 +1014,93 @@ fn course_lines(ui: &Ui, online: bool) -> Vec<Line<'static>> {
     l
 }
 
+/// "3 min ago", "2 h ago", "5 days ago": no clock or time zone needed.
+pub fn ago(secs: u64, now: u64) -> String {
+    let d = now.saturating_sub(secs);
+    match d {
+        0..60 => "just now".into(),
+        60..3600 => format!("{} min ago", d / 60),
+        3600..86400 => format!("{} h ago", d / 3600),
+        86400..172800 => "1 day ago".into(),
+        _ => format!("{} days ago", d / 86400),
+    }
+}
+
+const CHATS_INTRO: &str =
+    "Every chat is saved on this computer, and only here. Enter opens one so you can carry on.";
+
+fn draw_chats(f: &mut Frame, ui: &Ui, area: Rect) {
+    let mut l: Vec<Line> = vec![
+        Line::from(Span::styled(CHATS_INTRO, Style::default().fg(DIM))),
+        Line::from(""),
+    ];
+    if ui.chats.is_empty() {
+        l.push(Line::from(
+            "No saved chats yet. A chat is saved here after its first answer.",
+        ));
+    }
+    let now = trurl_core::history::now();
+    // Two lines per chat. Inside the border: the intro (as wrapped), a blank
+    // line, and room for "more above" and "more below".
+    let inner_w = (area.width as usize).saturating_sub(2).max(1);
+    let intro = CHATS_INTRO.chars().count().div_ceil(inner_w);
+    let room = ((area.height as usize).saturating_sub(2 + intro + 1 + 2) / 2).max(1);
+    let start = window_start(ui.chats.len(), ui.chats_sel, room);
+    if start > 0 {
+        l.push(Line::from(Span::styled(
+            format!("  ↑ {start} more above"),
+            Style::default().fg(DIM),
+        )));
+    }
+    for (i, c) in ui.chats.iter().enumerate().skip(start).take(room) {
+        // Two lines each: the first question, then when, how long, which model.
+        let sel = i == ui.chats_sel;
+        let st = if sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        let here = ui.chat_id.as_deref() == Some(c.id.as_str());
+        l.push(Line::from(vec![
+            Span::styled(if sel { "› " } else { "  " }, st),
+            Span::styled(c.title.clone(), st),
+        ]));
+        l.push(Line::from(vec![
+            Span::styled(
+                format!(
+                    "    {}, {} question{}{}",
+                    ago(c.updated, now),
+                    c.turns,
+                    if c.turns == 1 { "" } else { "s" },
+                    if c.model.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", {}", c.model)
+                    }
+                ),
+                Style::default().fg(DIM),
+            ),
+            Span::styled(
+                if here { "  ◆ on screen" } else { "" },
+                Style::default().fg(Color::Green),
+            ),
+        ]));
+    }
+    let more = ui.chats.len().saturating_sub(start + room);
+    if more > 0 {
+        l.push(Line::from(Span::styled(
+            format!("  ↓ {more} more below"),
+            Style::default().fg(DIM),
+        )));
+    }
+    f.render_widget(
+        Paragraph::new(l)
+            .block(block("Chats"))
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
 fn draw_hub(f: &mut Frame, ui: &Ui, area: Rect) {
     match ui.hub_view {
         HubView::Checking => {
@@ -1387,6 +1488,7 @@ fn draw_about(f: &mut Frame, ui: &Ui, area: Rect) {
         ("F2", "models: use, import, delete"),
         ("F3", "settings: system prompt, temperature, context size"),
         ("F4", "Hugging Face (needs internet)"),
+        ("F9", "chats: open an old chat and carry on, delete"),
         ("F12", "Hugging Face token (only for gated models)"),
         ("Ctrl+Q", "quit"),
     ] {
@@ -1525,12 +1627,33 @@ fn draw_confirm(f: &mut Frame, c: &Confirm, area: Rect) {
         }
         Confirm::NewChat => (
             "Start a new chat?",
-            "The model is still answering. The answer so far will be lost.".to_string(),
+            "The model is still answering. The answer stops here and stays in your chats (F9).".to_string(),
             "Enter: start a new chat",
+        ),
+        Confirm::DeleteChat { title, stops, .. } => (
+            "Delete this chat?",
+            format!(
+                "“{title}” is deleted from this computer. This cannot be undone.{}",
+                if *stops { " The answer being written stops." } else { "" }
+            ),
+            "Enter: delete",
+        ),
+        Confirm::DeleteAllChats { count } => (
+            "Delete all chats?",
+            format!(
+                "All {count} saved chat{} are deleted from this computer, and the chat on screen is cleared. This cannot be undone.",
+                if *count == 1 { "" } else { "s" }
+            ),
+            "Enter: delete all chats",
+        ),
+        Confirm::OpenChat { .. } => (
+            "Stop the answer and open this chat?",
+            "The answer being written stops here. It stays in its chat, so you can read it later.".to_string(),
+            "Enter: open the chat",
         ),
         Confirm::Quit => (
             "Quit Trurl?",
-            "This chat will be lost. To keep an answer, press Esc, then F6 to copy it.".to_string(),
+            "Your chats are saved on this computer (F9 next time). An answer being written stops, and a message you have not sent is lost.".to_string(),
             "Enter: quit",
         ),
         Confirm::ClearSystemPrompt => (
