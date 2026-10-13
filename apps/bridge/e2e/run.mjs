@@ -462,6 +462,21 @@ if (SUITE === "full") {
     await shot(page, "about");
     await closeDialogs();
   });
+
+  await step("automatic update check can be turned off, and stays off", async () => {
+    await page.click("#openAbout");
+    const box = page.locator("#autoUpdate");
+    if (!(await box.isChecked())) throw new Error("automatic update check should start on");
+    await box.uncheck();
+    await closeDialogs();
+    // The saved setting, read back from the core, not the checkbox left on screen.
+    const saved = await page.evaluate(async () => (await window.trurl.call("snapshot")).settings.auto_update_check);
+    if (saved !== false) throw new Error(`core still has auto_update_check=${saved}`);
+    await page.click("#openAbout");
+    if (await page.locator("#autoUpdate").isChecked()) throw new Error("About shows it on again after reopening");
+    await page.locator("#autoUpdate").check(); // back on, for the steps after this one
+    await closeDialogs();
+  });
 }
 
 if (SUITE === "update") {

@@ -144,7 +144,12 @@ jobs:
       - name: Build the USB installer
         working-directory: apps/desktop
         run: |
-          npx --no -- tauri build --config src-tauri/tauri.usb.conf.json -- --locked
+          # As the release does: mark trurl.exe for NSIS ourselves (that is where the
+          # release signs it), then bundle without letting Tauri patch it again.
+          npx --no -- tauri build --no-bundle -- --locked
+          python ../../scripts/patch_bundle_type.py ../../target/release/trurl.exe nsis
+          if ($LASTEXITCODE -ne 0) { throw "bundle type marker" }
+          npx --no -- tauri bundle --bundles nsis --no-binary-patching --config src-tauri/tauri.usb.conf.json
           # Named like the release asset, so docs/USB-BUNDLE.md works before the first release.
           New-Item -ItemType Directory -Force ../../target/usb | Out-Null
           $v = (Get-Content ../../pins.json | ConvertFrom-Json).app.version

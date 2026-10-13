@@ -38,7 +38,8 @@ exists once a release is **published**, not while it is a draft.
    ```
 5. **The Release workflow** then does the rest. It:
    - rebuilds llama-server from source;
-   - builds both installers and smoke-tests the USB one on Windows;
+   - builds both installers, has them code-signed (you approve two requests on
+     signpath.io, see below) and smoke-tests the USB one on Windows;
    - builds the Linux tarball;
    - signs the update files, and checks every signature the way installed copies
      will;
@@ -85,21 +86,70 @@ exists once a release is **published**, not while it is a draft.
   during the download). Trurl says so, keeps the old version and its model, and
   offers the update again at the next check.
 
-## Windows code signing (recommended)
+## Windows code signing (SignPath Foundation)
 
-The installers are not Authenticode-signed yet, which has two effects:
+Without an Authenticode signature, Windows SmartScreen shows "Windows protected your
+PC" and many learners stop there. The Release workflow signs the Windows files through
+[SignPath Foundation](https://signpath.org), free for open-source projects. The policy
+learners and SignPath read is [CODE-SIGNING.md](CODE-SIGNING.md).
 
-- **SmartScreen.** It shows "Windows protected your PC" on first install. Click "More
-  info", then "Run anyway".
-- **Smart App Control.** On Windows 11 computers that have it turned on (most fresh
-  installs start in evaluation mode), unsigned programs are blocked and there is no
-  per-app way around it.
+### How a signed release runs
 
-To fix both:
+1. Windows job: `tauri build --no-bundle`, then `scripts/patch_bundle_type.py` marks
+   `trurl.exe` as installed by NSIS (what `tauri bundle` would do, and it must happen
+   before signing, since changing a signed file breaks the signature).
+2. `trurl.exe` is uploaded as a GitHub artifact and submitted to SignPath
+   (configuration `trurl-exe`). **You approve the request on signpath.io.**
+3. The signed `trurl.exe` goes into both installers (`tauri bundle --no-binary-patching`).
+4. Both installers are submitted together (configuration `installers`). **You approve
+   again.**
+5. The smoke test installs the signed USB installer and checks both signatures, then
+   the publish job adds the updater signatures (over the signed files) as before.
 
-- get a code-signing certificate: Azure Trusted Signing, or the free SignPath
-  Foundation programme for open-source projects;
-- add a signing step in `release.yml` for every `.exe`, including the
-  `llama-server.exe` builds, before the installers are built.
+Each request waits up to 2 hours for approval; after that the run fails and you re-run
+it from the Actions tab. SignPath emails the approver when a request is waiting.
+
+### One-time setup
+
+1. **Apply** at <https://signpath.org/apply> for `https://github.com/jbarbier/trurl`.
+   Turn on two-factor authentication on GitHub first (required). Mention that:
+   - `llama-server.exe` (llama.cpp, MIT) is built from pinned upstream source and
+     shipped unsigned inside the installer; only Trurl's own `trurl.exe` and the
+     installers are signed;
+   - the USB installer embeds Microsoft's WebView2 runtime installer (Microsoft-signed,
+     redistributable), which the app needs to draw its window;
+   - the only automatic network contact is the update check, documented in
+     CODE-SIGNING.md and off with one checkbox.
+2. **In SignPath**, once approved:
+   - Project slug `trurl`, repository `https://github.com/jbarbier/trurl`.
+   - Trusted build system: GitHub.com, linked to the project.
+   - Artifact configurations: `trurl-exe` (paste
+     [`packaging/signpath/trurl-exe.xml`](../packaging/signpath/trurl-exe.xml)) and
+     `installers` (paste [`packaging/signpath/installers.xml`](../packaging/signpath/installers.xml)).
+   - Signing policy slug `release-signing`, with the SignPath Foundation certificate,
+     manual approval, approver: you.
+   - An API token for a user with the **submitter** role on that policy.
+3. **In GitHub** (Settings, Secrets and variables, Actions):
+   ```
+   gh secret set SIGNPATH_API_TOKEN                     # paste the token
+   gh variable set SIGNPATH_ORGANIZATION_ID --body <your SignPath organization id>
+   ```
+   Signing is on from the next run. Without the variable, releases build unsigned and
+   the run shows a warning.
+4. **Try it without releasing:** Actions, Release, **Run workflow**, tick "Code-sign".
+   A dry run builds, signs and smoke-tests everything, and creates no release.
+
+### What signing does not cover
+
+- **SmartScreen reputation.** A signature says who made the file. SmartScreen may still
+  warn for a while on a brand-new release until enough people have run it; SignPath
+  Foundation's certificate is shared by many projects and has a long history, which
+  usually makes this short.
+- **Smart App Control.** On Windows 11 computers that have it on, every program must be
+  signed or known to Microsoft. `llama-server.exe` is not signed (SignPath Foundation
+  only signs a project's own code), so on those computers Trurl most likely installs
+  but cannot start a model. Not tested yet: it needs a Windows 11 computer with Smart
+  App Control on. Fixing it needs either llama.cpp's maintainers to sign their builds,
+  or Trurl's own certificate (Azure Artifact Signing) to sign them.
 
 Updates are protected by the minisign signature either way.

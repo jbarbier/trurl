@@ -319,6 +319,7 @@ fn draw_footer(f: &mut Frame, ui: &Ui, area: Rect) {
                 ("Enter", "read", true),
                 ("PgUp/PgDn", "scroll", false),
                 ("U", "updates", false),
+                ("A", "auto check", false),
                 ("Esc", "back", true),
             ],
             Screen::Token => vec![
@@ -1532,8 +1533,14 @@ fn draw_about(f: &mut Frame, ui: &Ui, area: Rect) {
     )));
     l.push(Line::from(format!("Models folder: {}", ui.models_dir)));
     l.push(Line::from(""));
+    let auto = ui.settings.as_ref().is_none_or(|s| s.auto_update_check);
+    l.push(Line::from(if auto {
+        "Automatic update check: on (asks GitHub once a day). Press A to turn it off."
+    } else {
+        "Automatic update check: off (Trurl asks GitHub only when you press U). Press A to turn it on."
+    }));
     l.push(Line::from(Span::styled(
-        "Press U to check for updates.",
+        "Press U to check for updates now.",
         Style::default().fg(DIM),
     )));
     l.push(Line::from(""));

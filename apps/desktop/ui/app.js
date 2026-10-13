@@ -1651,6 +1651,11 @@
       }
       checkBtn.disabled = false;
     });
+    // Off: Trurl contacts GitHub about updates only when the button above is clicked.
+    const auto = h("input", { type: "checkbox", id: "autoUpdate" });
+    auto.checked = S.settings?.auto_update_check !== false;
+    auto.addEventListener("change", () => run("set_auto_update", { on: auto.checked }));
+    const autoLabel = h("label", { class: "auto-update", for: "autoUpdate" }, auto, "Check automatically (asks GitHub once a day)");
     const licList = h("div", { class: "licenses" }, h("p", { class: "state-msg" }, spinner(), "Loading licenses…"));
     const row = (k, ...v) => [h("dt", { text: k }), h("dd", null, ...v)];
 
@@ -1672,7 +1677,7 @@
           hw.cpu_name && h("span", { class: "muted", text: hw.cpu_name })
         ),
         row("Models folder", h("span", { class: "mono", text: S.models_dir }), h("button", { class: "btn btn-secondary", type: "button", "data-open-folder": "" }, "Open folder")),
-        row("Updates", checkBtn, result)
+        row("Updates", checkBtn, result, autoLabel)
       ),
       h("h3", { class: "sub-h", text: "Licenses" }),
       licList

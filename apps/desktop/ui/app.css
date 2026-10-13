@@ -624,6 +624,8 @@ input[type="range"]::-moz-range-thumb {
 .about-list .mono { font-size: 14px; overflow-wrap: anywhere; }
 .about-list .btn { margin-top: 2px; }
 .check-result { font-size: 15px; color: var(--ink2); }
+.auto-update { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--ink2); cursor: pointer; }
+.auto-update input { width: 18px; height: 18px; margin: 0; accent-color: var(--a); }
 .licenses { display: flex; flex-direction: column; gap: 8px; }
 .licenses details { background: var(--near); border: var(--bw) solid var(--hair); border-radius: var(--r-s); }
 .licenses summary {

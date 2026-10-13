@@ -215,6 +215,7 @@ fn main() {
             }
 
             // Update checks: once after launch, then every 24 hours. Offline: silently nothing.
+            // Turned off in About: no contact with GitHub unless the user clicks Check.
             let d = desktop.clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(update::FIRST_CHECK_AFTER).await;
@@ -223,6 +224,7 @@ fn main() {
                     let now = std::time::SystemTime::now();
                     // Never while an answer is being written or an update installs.
                     if schedule.due(now)
+                        && d.core.auto_update_check()
                         && !d.core.is_generating()
                         && !*d.installing.lock().unwrap()
                     {

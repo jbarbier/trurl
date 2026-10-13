@@ -14,6 +14,8 @@ for learners and teachers: short, plain, what changes for them.
 - Chats: every conversation is saved on your computer, and only there. Open an
   old chat to carry on where you stopped, with the same settings. Delete one chat,
   or all of them.
+- About has a new switch, **Check automatically**. Turn it off and Trurl contacts the
+  internet about updates only when you click **Check for updates**.
 
 ## 0.1.0
 
