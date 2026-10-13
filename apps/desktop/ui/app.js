@@ -1192,7 +1192,7 @@
       d.gated && !(S.settings && S.settings.has_hf_token) && h("p", { class: "gate-note", text: "This model needs a free Hugging Face account. Ask your teacher to add an access token (Ctrl+Shift+S)." }),
       h("h4", { class: "sub-h", text: "Files" }),
       h("p", { class: "muted", text: "Each file is the same model at a different size. Smaller files are faster and use less memory." }),
-      h("p", { class: "muted quant-legend", text: quantLegend(d.files) }),
+      h("p", { class: "muted quant-legend", text: quantLegend(d.files, (S.hardware || {}).variant) }),
       h("table", { class: "files" }, h("thead", null, h("tr", null, h("th", { text: "Version" }), h("th", { text: "Size" }), h("th", { text: "Fits this computer?" }), h("th", null, h("span", { class: "sr-only", text: "Action" })))), hubEls.files),
       h("h4", { class: "sub-h", text: "Model card" }),
     ]);
@@ -1203,10 +1203,11 @@
     renderFiles();
   }
 
-  function quantLegend(files) {
+  // Same rule as hub::recommend: Q4_0 is the fast format on the ssse3 and compat builds only.
+  function quantLegend(files, variant) {
     const rec = (files.find((f) => f.recommended) || {}).quant;
     const base = "The version name says how much the model was squeezed: Q4 keeps about 4 bits per number (small, good), Q8 keeps 8 (twice the size, a little more exact). Names starting with IQ or UD are other ways of squeezing.";
-    if (rec === "Q4_0") return base + " On this computer's processor, Q4_0 files answer fastest: the recommended one is listed first.";
+    if (rec === "Q4_0" && (variant === "ssse3" || variant === "compat")) return base + " On this computer's processor, Q4_0 files answer fastest: the recommended one is listed first.";
     if (rec) return base + ` The recommended one, ${rec}, is listed first.`;
     return base;
   }

@@ -302,15 +302,17 @@ pub fn chat_kind(pipeline_tag: Option<&str>, id: &str) -> Option<bool> {
     None
 }
 
-/// Mark the one file to pick on this computer, and list it first. With AVX2,
-/// Q4_K_M (small, good, what the course uses). Without AVX2, Q4_0 when the repo
-/// has it: llama.cpp has fast SSSE3 and AVX code for Q4_0 and none for the K
-/// formats, so on a 2006-2010 (SSSE3) processor Q4_0 answers about four times faster
-/// (measured: Gemma 3 1B, 8.2 against 2.0 words per second).
+/// Mark the one file to pick with the llama-server build `variant`, and list
+/// it first. Q4_K_M (small, good, what the course uses), except on the ssse3 and
+/// compat builds: llama.cpp has SSSE3 code for Q4_0 and none for the K formats,
+/// so there Q4_0 answers about four times faster on SSSE3 and a third faster on
+/// compat (Gemma 3 1B, words per second: 8.2 against 2.0, 2.8 against 2.1). On
+/// AVX both formats have fast code and Q4_0 gains only a fifth, not worth its
+/// lower quality.
 pub fn recommend(files: &mut [RepoFile], variant: crate::hardware::CpuVariant) {
     use crate::hardware::CpuVariant;
     let ok = |f: &RepoFile, q: &str| !f.split && f.quant.as_deref() == Some(q);
-    let order: &[&str] = if variant >= CpuVariant::Avx2 {
+    let order: &[&str] = if variant >= CpuVariant::Avx {
         &["Q4_K_M", "Q4_0"]
     } else {
         &["Q4_0", "Q4_K_M"]
@@ -456,26 +458,60 @@ mod tests {
     #[test]
     fn old_processors_are_pointed_to_q4_0() {
         use crate::hardware::CpuVariant;
-        let file = |q: &str| RepoFile {
-            path: format!("m-{q}.gguf"),
+        let file = |q: &str, split: bool| RepoFile {
+            path: format!("m-{q}{}.gguf", if split { "-00001-of-00002" } else { "" }),
             size: 1,
             sha256: None,
             quant: Some(q.into()),
             fit: crate::hardware::RamFit::Green,
-            split: false,
+            split,
             recommended: false,
         };
-        let mut files = vec![file("Q2_K"), file("Q4_0"), file("Q4_K_M"), file("Q8_0")];
-        recommend(&mut files, CpuVariant::Avx2);
-        assert!(files[0].recommended && files[0].quant.as_deref() == Some("Q4_K_M"));
-        assert_eq!(files.iter().filter(|f| f.recommended).count(), 1);
-        recommend(&mut files, CpuVariant::Ssse3);
-        assert!(files[0].recommended && files[0].quant.as_deref() == Some("Q4_0"));
-        assert_eq!(files.iter().filter(|f| f.recommended).count(), 1);
-        // No Q4_0 in the repo: Q4_K_M all the same.
-        let mut files = vec![file("Q2_K"), file("Q4_K_M")];
+        let pick = |files: &[RepoFile]| -> Option<String> {
+            let marked: Vec<&RepoFile> = files.iter().filter(|f| f.recommended).collect();
+            assert!(marked.len() <= 1, "one recommended file at most");
+            let f = marked.first()?;
+            assert_eq!(
+                f.path, files[0].path,
+                "the recommended file is listed first"
+            );
+            f.quant.clone()
+        };
+        let all = vec![
+            file("Q2_K", false),
+            file("Q4_0", false),
+            file("Q4_K_M", false),
+            file("Q8_0", false),
+        ];
+        for (variant, want) in [
+            (CpuVariant::Avx2, "Q4_K_M"),
+            (CpuVariant::Avx, "Q4_K_M"),
+            (CpuVariant::Ssse3, "Q4_0"),
+            (CpuVariant::Compat, "Q4_0"),
+        ] {
+            let mut files = all.clone();
+            recommend(&mut files, variant);
+            assert_eq!(pick(&files).as_deref(), Some(want), "{variant:?}");
+            // Called again (the screen reopens): still one, still first.
+            recommend(&mut files, variant);
+            assert_eq!(pick(&files).as_deref(), Some(want), "{variant:?} again");
+        }
+        // No Q4_0 in the repo: Q4_K_M all the same; no Q4_K_M: Q4_0 on AVX2.
+        let mut files = vec![file("Q2_K", false), file("Q4_K_M", false)];
         recommend(&mut files, CpuVariant::Compat);
-        assert!(files[0].recommended && files[0].quant.as_deref() == Some("Q4_K_M"));
+        assert_eq!(pick(&files).as_deref(), Some("Q4_K_M"));
+        let mut files = vec![file("Q8_0", false), file("Q4_0", false)];
+        recommend(&mut files, CpuVariant::Avx2);
+        assert_eq!(pick(&files).as_deref(), Some("Q4_0"));
+        // A model split in parts is never recommended (Trurl downloads one file).
+        let mut files = vec![file("Q4_0", true), file("Q4_K_M", false)];
+        recommend(&mut files, CpuVariant::Ssse3);
+        assert_eq!(pick(&files).as_deref(), Some("Q4_K_M"));
+        // Neither format: nothing is recommended, the order is kept.
+        let mut files = vec![file("Q8_0", false), file("IQ2_M", false)];
+        recommend(&mut files, CpuVariant::Ssse3);
+        assert_eq!(pick(&files), None);
+        assert_eq!(files[0].quant.as_deref(), Some("Q8_0"));
     }
 
     #[test]

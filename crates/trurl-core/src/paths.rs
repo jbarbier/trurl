@@ -88,7 +88,7 @@ impl Paths {
     }
 }
 
-/// Folder holding the llama-server builds (`avx2/`, `avx/`, `compat/`).
+/// Folder holding the llama-server builds (`avx2/`, `avx/`, `ssse3/`, `compat/`).
 ///
 /// Looked up in order: `TRURL_LLAMA_DIR`, `<exe dir>/llama`, `<exe dir>/../llama`
 /// (Tauri puts resources next to the exe on Windows), and the repo's

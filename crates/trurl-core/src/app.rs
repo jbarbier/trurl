@@ -25,7 +25,7 @@ pub type Sink = Arc<dyn Fn(Event) + Send + Sync>;
 
 pub struct AppConfig {
     pub paths: Paths,
-    /// Folder with `avx2/` and `compat/` llama-server builds. None: not found.
+    /// Folder with the `avx2/`, `avx/`, `ssse3/` and `compat/` llama-server builds. None: not found.
     pub llama_root: Option<PathBuf>,
     /// Hugging Face base URL (tests point it at a local server).
     pub hf_base: String,
@@ -984,7 +984,13 @@ impl App {
 
     pub async fn hub_details(&self, repo: &str) -> Result<RepoFiles, UserError> {
         let mut d = self.hub().details(repo, self.inner.hw.total_ram).await?;
-        crate::hub::recommend(&mut d.files, self.inner.hw.variant);
+        // The build that runs here, not the detected one: after an AVX2 crash the
+        // AVX build answers, and Q4_0 is its faster format.
+        let variant = {
+            let st = self.inner.state.lock().unwrap();
+            self.variant_locked(&st.settings)
+        };
+        crate::hub::recommend(&mut d.files, variant);
         Ok(d)
     }
 

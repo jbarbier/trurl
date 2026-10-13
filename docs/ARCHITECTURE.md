@@ -41,7 +41,7 @@ How Trurl is built and why. For using Trurl, see the [README](../README.md).
 ## llama-server
 
 **Built from source.** `scripts/build_llama.py` downloads the llama.cpp source at the
-pinned commit (`v0.6.0`, build `b11429`), checks its SHA-256, and builds three
+pinned commit (`v0.6.0`, build `b11429`), checks its SHA-256, and builds four
 **static** `llama-server` executables. Static means one file each: no DLLs, no
 Visual C++ runtime, no OpenSSL, no OpenMP.
 
@@ -69,9 +69,12 @@ engine (words per second while answering / while reading the prompt):
 (2-core AMD EPYC cloud computer, 2 threads, short prompts, temperature 0, each
 engine forced on the same machine.)
 
-So on a processor without AVX2, the Hugging Face screen recommends the Q4_0 file of a
-model when there is one (`hub::recommend`), and Q4_K_M otherwise. The bundled models
-stay Q4_K_M, as pinned.
+So with the ssse3 and compat builds, the Hugging Face screen recommends the Q4_0 file
+of a model when there is one (`hub::recommend`), and Q4_K_M otherwise. With AVX both
+formats have fast code and Q4_0 gains only a fifth, not worth its lower quality, so
+AVX and AVX2 get Q4_K_M, what the course uses. The choice follows the build that
+actually runs (after a crash that is a slower one), not the detected processor. The
+bundled models stay Q4_K_M, as pinned.
 
 How the build is picked and kept honest:
 
@@ -81,9 +84,13 @@ How the build is picked and kept honest:
   and FMA versions of some routines that it only uses after asking the CPU, which a
   disassembler cannot tell apart from a real problem). Then
   `scripts/check_cpu_emulated.py` runs each build under Intel's Software Development
-  Emulator pretending to be its oldest CPU (`compat` on a 2004 Pentium 4, `avx` on
-  Sandy Bridge, `avx2` on Haswell) and makes it answer. The emulator stops the
-  program on the first instruction that CPU lacks, so a pass means it really runs.
+  Emulator pretending to be its oldest CPU (`compat` on a 2004 Pentium 4, `ssse3`
+  on a 2006 Core 2 Merom, `avx` on Sandy Bridge, `avx2` on Haswell) and makes it
+  answer, twice: with a tiny f32 model and with a Q4_0 copy of it that the script
+  writes, so the quantized code paths run too. The emulator stops the program on the
+  first instruction that CPU lacks, so a pass means it really runs. The disassembler
+  check has a `--self-test` (in the gates) that compiles one sample per instruction
+  set and proves each pattern catches it.
 - **Picked at start.** `hardware.rs` reads the CPU features (`is_x86_feature_detected!`,
   which also checks that the OS supports AVX) and picks the fastest build present.
 - **Stepping down.** If a build still crashes with an illegal-instruction error,
@@ -345,7 +352,7 @@ models for an update.
   - `models/*.gguf`, which the installer copies to the models folder (`.part` then
     rename, same-size files skipped; never during an update);
   - `LICENSES/`, `READ-ME-FIRST.txt` and `SHA256SUMS.txt`.
-- **Linux:** `trurl-<v>-linux-x64.tar.gz` holds the `trurl` binary, the three
+- **Linux:** `trurl-<v>-linux-x64.tar.gz` holds the `trurl` binary, the four
   llama-server builds, the licenses and `install.sh`. It is built in Debian 11 so it
   runs on glibc 2.31 and newer.
 

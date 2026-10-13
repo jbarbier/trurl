@@ -142,7 +142,8 @@ When the computer is online, the **Hugging Face** tab of the Models screen searc
 - **Details.** Click a result to see who made the model, its license, how many
   parameters it has, its model card, and every file.
 - **Files.** Each file is the same model at a different size (its quantization, like
-  Q4_K_M or Q8_0), with its memory fit. Q4_K_M is marked **Recommended**.
+  Q4_K_M or Q8_0), with its memory fit. One is marked **Recommended** and listed
+  first: Q4_K_M, or Q4_0 on a processor from before 2011 (it answers faster there).
 - **Download.** Click **Download** on a file.
 
 Downloads survive bad connections:
@@ -209,7 +210,8 @@ when it starts:
   these, models in the Q4_0 format answer about four times faster than Q4_K_M:
   the Hugging Face screen recommends Q4_0 files there.
 - **Compatible:** anything older (Pentium 4, Athlon 64, AMD Phenom). It is slow
-  (about 2 words per second for Gemma 3 1B), but it runs.
+  (about 2 words per second for Gemma 3 1B, a third more with Q4_0, which the
+  Hugging Face screen recommends there too), but it runs.
 
 Each engine contains only the instructions of its processors, which
 `scripts/check_cpu_isa.py` proves on every build, and each one answers on an
@@ -218,10 +220,11 @@ emulated processor of its oldest kind, down to a 2004 Pentium 4
 
 If a computer cannot run the engine Trurl picked, Trurl moves down a level by itself.
 
-**Memory:** 4 GB runs Gemma 3 1B and Qwen3 0.6B. 8 GB also runs Gemma 3 4B. No
-graphics card is needed.
+**Memory:** 4 GB runs Gemma 3 1B and Qwen3 0.6B (about 0.9 GB each while answering).
+Gemma 3 4B needs about 2.8 GB: easy with 8 GB, possible with 4 GB if every other app
+is closed. No graphics card is needed.
 
-**Disk:** about 55 MB for Trurl on Linux and about 35 MB installed on Windows, plus
+**Disk:** about 70 MB for Trurl on Linux and about 35 MB installed on Windows, plus
 the models: 0.5 to 2.5 GB each. The Windows installer is 12 MB; the USB installer is
 227 MB because it carries WebView2 for computers that lack it.
 
@@ -232,7 +235,8 @@ to run it offline. Method and raw numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.
 
 **What it means on a learner's laptop:**
 
-- **Smallest by far.** Trurl is about 55 MB on disk, 40 times smaller than Ollama:
+- **Smallest by far.** Trurl is about 70 MB on disk with its four engines, 30 times
+  smaller than Ollama:
   it fits on any old laptop and on the USB stick with its models.
 - **Starts in about 2 seconds,** several times faster than Ollama.
 - **Keeps working when memory runs out.** With only 500 MB of memory left for
@@ -252,9 +256,9 @@ to run it offline. Method and raw numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.
 <!-- benchmarks:start -->
 | | App on disk | Load time | First word | Speed | RAM, idle | RAM, answering | CPU, idle |
 |---|---|---|---|---|---|---|---|
-| Trurl | **54 MB** | **1.5 s** | 0.75 s | **9.8 tokens/s (8.8 to 10.1)** | 980 MB | 980 MB | **0.0%** |
-| Ollama | 2,253 MB | 6.8 s | 0.74 s | **10.8 tokens/s (10.1 to 11.2)** | 953 MB | 953 MB | **0.0%** |
-| llamafile | 368 MB | 2.0 s | **0.71 s** | 7.0 tokens/s (6.4 to 7.2) | **936 MB** | **936 MB** | **0.0%** |
+| Trurl | **71 MB** | **1.4 s** | 0.76 s | **11.2 tokens/s (10.5 to 11.9)** | **905 MB** | **905 MB** | **0.0%** |
+| Ollama | 2,253 MB | 6.3 s | 0.62 s | **11.6 tokens/s (10.7 to 12.6)** | 951 MB | 953 MB | **0.0%** |
+| llamafile | 368 MB | 1.9 s | **0.61 s** | 8.0 tokens/s (7.4 to 8.6) | 936 MB | 936 MB | **0.0%** |
 
 A small cloud computer (2 AMD EPYC cores with AVX2), 2 threads, 7.8 GB RAM, no GPU. Model: `gemma-3-1b-it-Q4_K_M.gguf` for every app, context 2,048, temperature 0, answers of up to 128 tokens, median of 3 prompts x 5 rounds (the apps take turns each round). Speed in brackets: the middle half of the answers. Measured 2026-10-13 by `scripts/benchmark.py`.
 
@@ -262,9 +266,18 @@ A small cloud computer (2 AMD EPYC cores with AVX2), 2 threads, 7.8 GB RAM, no G
 
 | Memory left for the app | 1.5G | 1G | 750M | 500M |
 |---|---|---|---|---|
-| Trurl | answers in 1 s | answers in 1 s | answers in 12 s | answers in 10 s |
+| Trurl | answers in 1 s | answers in 1 s | answers in 8 s | answers in 16 s |
 | Ollama | answers in 1 s | answers in 1 s | does not start | does not start |
-| llamafile | answers in 1 s | answers in 1 s | answers in 5 s | answers in 9 s |
+| llamafile | answers in 1 s | answers in 1 s | answers in 7 s | answers in 9 s |
+
+**Older computers, and a bigger model.** The same computer, running the engine an older CPU would get (avx: 2011 to 2012 processors; ssse3: 2006 to 2010; compat: anything older), and Gemma 3 4B. On ssse3 and compat, models in the Q4_0 format answer faster than these Q4_K_M ones: about four times on ssse3, a third on compat (docs/ARCHITECTURE.md).
+
+| Trurl | Model | Load time | First word | Speed | RAM, answering |
+|---|---|---|---|---|---|
+| avx engine | `gemma-3-1b-it-Q4_K_M.gguf` | 1.7 s | 1.1 s | 9.2 tokens/s | 905 MB |
+| ssse3 engine | `gemma-3-1b-it-Q4_K_M.gguf` | 2.7 s | 7.7 s | 2.0 tokens/s | 906 MB |
+| compat engine | `gemma-3-1b-it-Q4_K_M.gguf` | 2.6 s | 8.2 s | 1.9 tokens/s | 906 MB |
+| avx2 engine | `gemma-3-4b-it-Q4_K_M.gguf` | 10.9 s | 2.4 s | 3.9 tokens/s | 2,786 MB |
 <!-- benchmarks:end -->
 
 ## For teachers

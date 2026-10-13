@@ -373,3 +373,75 @@ fn hugging_face_warnings_wrap_at_80_columns() {
         "{s}"
     );
 }
+
+#[test]
+fn the_files_legend_says_why_q4_0_is_recommended_only_where_it_is_faster() {
+    use trurl_core::hardware::CpuVariant;
+    let file = |q: &str, recommended: bool| trurl_core::hub::RepoFile {
+        path: format!("m-{q}.gguf"),
+        size: 500_000_000,
+        sha256: None,
+        quant: Some(q.into()),
+        fit: RamFit::Green,
+        split: false,
+        recommended,
+    };
+    let show = |variant: CpuVariant, files: Vec<trurl_core::hub::RepoFile>| {
+        let mut ui = Ui::new();
+        ready(&mut ui);
+        ui.hardware = Some(trurl_core::events::HardwareSummary {
+            total_ram: 4 << 30,
+            physical_cores: 2,
+            threads: 2,
+            cpu_name: "test".into(),
+            variant,
+        });
+        ui.screen = Screen::Hub;
+        ui.hub_view = HubView::Details;
+        ui.hub_details = Some(trurl_core::hub::RepoFiles {
+            id: "someone/m-GGUF".into(),
+            author: None,
+            revision: "abc".into(),
+            gated: false,
+            license: None,
+            downloads: 1,
+            likes: 0,
+            updated: None,
+            base_model: None,
+            architecture: None,
+            context_length: None,
+            parameters: None,
+            tags: vec![],
+            chat: Some(true),
+            readme: None,
+            files,
+        });
+        flat(&screen(&ui, 120, 40))
+    };
+    let faster = "On this computer's processor, Q4_0 answers fastest";
+    // A Core 2: the core recommended Q4_0 because it is faster here.
+    let s = show(
+        CpuVariant::Ssse3,
+        vec![file("Q4_0", true), file("Q4_K_M", false)],
+    );
+    assert!(s.contains(faster), "{s}");
+    // A recent processor, on a repo that only has Q4_0: recommended, but not
+    // for speed, so the screen must not claim it.
+    let s = show(
+        CpuVariant::Avx2,
+        vec![file("Q4_0", true), file("Q8_0", false)],
+    );
+    assert!(!s.contains(faster), "{s}");
+    assert!(
+        s.contains("The recommended one, Q4_0, is listed first."),
+        "{s}"
+    );
+    let s = show(
+        CpuVariant::Avx2,
+        vec![file("Q4_K_M", true), file("Q4_0", false)],
+    );
+    assert!(
+        s.contains("The recommended one, Q4_K_M, is listed first."),
+        "{s}"
+    );
+}

@@ -6,6 +6,7 @@
 //   failed    the model did not load (too big)
 //   update    an update is offered a few seconds after start
 //   chat      a conversation already on screen, with reasoning
+//   oldcpu    a 2008 laptop (SSSE3 engine): Hugging Face recommends Q4_0 files
 // Timings are short but real enough to see streaming and loading states.
 
 (function () {
@@ -27,7 +28,7 @@
       version: "0.1.0",
       llama_build: "v0.6.0 (b11429)",
       models_dir: "C:\\Users\\Ama\\AppData\\Local\\CyberiadLabs\\Trurl\\models",
-      hardware: { total_ram: 4 * GB, physical_cores: 2, threads: 2, cpu_name: "Intel(R) Core(TM) i5-3320M CPU @ 2.60GHz", variant: "avx" },
+      hardware: { total_ram: 4 * GB, physical_cores: 2, threads: 2, cpu_name: scenario === "oldcpu" ? "Intel(R) Core(TM)2 Duo CPU T6600 @ 2.20GHz" : "Intel(R) Core(TM) i5-3320M CPU @ 2.60GHz", variant: scenario === "oldcpu" ? "ssse3" : "avx" },
       settings: { system_prompt: "", temperature: 0.7, context_size: 2048, model: models[0].file, has_hf_token: false, default_temperature: 0.7, default_context: 2048, context_choices: [256, 512, 1024, 2048, 4096, 8192] },
       models: scenario === "empty" ? [] : models.slice(),
       engine: { state: "idle" },
@@ -133,13 +134,17 @@
     ];
     const README = "# Qwen3 0.6B (GGUF)\n\nQuantized by **bartowski** with llama.cpp.\n\nQwen3 is a family of models that can **think** before answering. Add `/no_think` to your message to turn thinking off.\n\n## Which file should I pick?\n\n| File | Size | Notes |\n|---|---|---|\n| Q4_K_M | 484 MB | Good balance, recommended |\n| Q8_0 | 805 MB | Highest quality |\n\n## License\n\nApache 2.0.";
     function details(repo) {
+      // As hub::recommend: Q4_0 first on the ssse3 and compat engines, Q4_K_M otherwise.
+      const q40 = scenario === "oldcpu";
       const files = [
-        { path: "Qwen_Qwen3-0.6B-Q4_K_M.gguf", size: 484220320, sha256: "b".repeat(64), quant: "Q4_K_M", fit: "green", split: false, recommended: true },
+        { path: "Qwen_Qwen3-0.6B-Q4_K_M.gguf", size: 484220320, sha256: "b".repeat(64), quant: "Q4_K_M", fit: "green", split: false, recommended: !q40 },
+        { path: "Qwen_Qwen3-0.6B-Q4_0.gguf", size: 428962880, sha256: "f".repeat(64), quant: "Q4_0", fit: "green", split: false, recommended: q40 },
         { path: "Qwen_Qwen3-0.6B-Q2_K.gguf", size: 347000000, sha256: "a".repeat(64), quant: "Q2_K", fit: "green", split: false },
         { path: "Qwen_Qwen3-0.6B-Q8_0.gguf", size: 804750592, sha256: "c".repeat(64), quant: "Q8_0", fit: "green", split: false },
         { path: "Qwen_Qwen3-0.6B-bf16.gguf", size: 1509347488, sha256: "d".repeat(64), quant: "BF16", fit: "green", split: false },
         { path: "big/Qwen-big-00001-of-00002.gguf", size: 3500000000, sha256: "e".repeat(64), quant: null, fit: "red", split: true },
       ];
+      if (q40) files.unshift(files.splice(1, 1)[0]);
       return { id: repo, author: repo.split("/")[0], revision: "60b85c0e3d8fe0f6474f406922a26d12aca4550d", gated: false, license: "apache-2.0", downloads: 82560, likes: 28, updated: "2025-04-28T17:26:40.000Z", base_model: "Qwen/Qwen3-0.6B", architecture: "qwen3", context_length: 32768, parameters: 751632384, tags: ["gguf", "text-generation", "conversational"], readme: README, files };
     }
 

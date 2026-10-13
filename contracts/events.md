@@ -80,11 +80,14 @@ Settings    { system_prompt, temperature, context_size, model?, has_hf_token,
               default_temperature, default_context, context_choices[] }
 Snapshot    { version, llama_build, models_dir, hardware{ total_ram, physical_cores, threads,
               cpu_name, variant }, settings, models[], engine, turns[], generating, downloads[] }
+              variant: "avx2"|"avx"|"ssse3"|"compat", the llama-server build for this processor
 RepoHit     { id, downloads, likes, gated, updated?, chat? }
               chat: false = this model does not chat (embeddings, speech, rerankers)
 RepoDetails { id, author?, revision, gated, license?, downloads, likes, updated?, base_model?,
               architecture?, context_length?, parameters?, tags[], chat?, readme?, files: RepoFile[] }
-RepoFile    { path, size, sha256?, quant?, fit, split }
+RepoFile    { path, size, sha256?, quant?, fit, split, recommended }
+              recommended: the one file to pick on this computer, listed first (Q4_K_M with
+              AVX2; Q4_0 when there is one on an older processor; see hub::recommend)
 Download    { id, repo, file, revision, dest_file, size, sha256?, done, rate, user_paused, synced,
               status: "running"|"retrying"|"paused"|"verifying"|"failed"|"done", error? }
               synced: bytes known to be on disk (resume point after a power cut)

@@ -1083,10 +1083,14 @@ fn draw_hub_details(f: &mut Frame, ui: &Ui, area: Rect) {
     head.extend(wrap_plain(
         &format!(
             "Each file is the same model at a different size: Q4 keeps about 4 bits per number (small, good), Q8 keeps 8 (twice the size, a little more exact); IQ and UD are other ways of squeezing.{}",
-            match d.files.iter().find(|f| f.recommended).and_then(|f| f.quant.as_deref()) {
-                Some("Q4_0") => " On this computer's processor, Q4_0 answers fastest: the recommended file is listed first.".to_string(),
-                Some(q) => format!(" The recommended one, {q}, is listed first."),
-                None => String::new(),
+            // Same rule as hub::recommend: Q4_0 is the fast format on ssse3 and compat only.
+            match (
+                d.files.iter().find(|f| f.recommended).and_then(|f| f.quant.as_deref()),
+                ui.hardware.as_ref().map(|h| h.variant),
+            ) {
+                (Some("Q4_0"), Some(CpuVariant::Ssse3 | CpuVariant::Compat)) => " On this computer's processor, Q4_0 answers fastest: the recommended file is listed first.".to_string(),
+                (Some(q), _) => format!(" The recommended one, {q}, is listed first."),
+                (None, _) => String::new(),
             }
         ),
         w,

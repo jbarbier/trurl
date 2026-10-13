@@ -11,94 +11,97 @@
   "results": [
     {
       "app": "Trurl",
-      "disk_mb": 54,
-      "load_s": 1.5,
-      "first_word_s": 0.75,
-      "tokens_per_s": 9.8,
+      "disk_mb": 71,
+      "load_s": 1.4,
+      "first_word_s": 0.76,
+      "tokens_per_s": 11.2,
       "tokens_per_s_range": [
-        8.8,
-        10.1
+        10.5,
+        11.9
       ],
       "tokens_per_s_all": [
-        7.93,
-        7.29,
-        8.59,
-        9.11,
-        9.08,
-        10.43,
-        10.04,
-        10.25,
-        10.35,
-        10.0,
-        10.26,
-        9.98,
-        9.81,
-        9.28,
-        7.88
+        11.39,
+        10.77,
+        12.27,
+        12.26,
+        11.82,
+        11.2,
+        4.53,
+        3.76,
+        12.01,
+        8.87,
+        10.23,
+        11.92,
+        11.26,
+        10.96,
+        11.12
       ],
-      "ram_idle_mb": 980,
-      "ram_peak_mb": 980,
+      "ram_idle_mb": 905,
+      "ram_own_process_mb": 5,
+      "ram_peak_mb": 905,
       "cpu_idle_pct": 0.0
     },
     {
       "app": "Ollama",
       "disk_mb": 2253,
-      "load_s": 6.8,
-      "first_word_s": 0.74,
-      "tokens_per_s": 10.8,
+      "load_s": 6.3,
+      "first_word_s": 0.62,
+      "tokens_per_s": 11.6,
       "tokens_per_s_range": [
-        10.1,
-        11.2
+        10.7,
+        12.6
       ],
       "tokens_per_s_all": [
-        8.61,
-        9.7,
+        11.03,
+        11.04,
         9.82,
-        11.23,
-        10.82,
-        10.85,
-        10.92,
-        11.84,
-        12.14,
-        11.23,
-        12.09,
-        10.29,
-        10.85,
-        11.15,
-        8.66
+        12.02,
+        9.13,
+        12.72,
+        2.62,
+        12.4,
+        13.33,
+        11.65,
+        11.59,
+        10.42,
+        12.89,
+        11.76,
+        12.81
       ],
-      "ram_idle_mb": 953,
+      "ram_idle_mb": 951,
+      "ram_own_process_mb": 35,
       "ram_peak_mb": 953,
       "cpu_idle_pct": 0.0
     },
     {
       "app": "llamafile",
       "disk_mb": 368,
-      "load_s": 2.0,
-      "first_word_s": 0.71,
-      "tokens_per_s": 7.0,
+      "load_s": 1.9,
+      "first_word_s": 0.61,
+      "tokens_per_s": 8.0,
       "tokens_per_s_range": [
-        6.4,
-        7.2
+        7.4,
+        8.6
       ],
       "tokens_per_s_all": [
-        7.14,
-        6.18,
-        6.69,
-        6.75,
-        7.08,
-        7.5,
-        7.45,
-        7.55,
-        7.16,
-        7.05,
-        7.33,
-        3.99,
-        6.0,
-        6.66,
-        5.88
+        8.15,
+        8.41,
+        8.58,
+        8.81,
+        8.65,
+        8.83,
+        7.32,
+        5.56,
+        4.41,
+        8.0,
+        7.75,
+        8.03,
+        8.78,
+        7.49,
+        7.17
       ],
       "ram_idle_mb": 936,
+      "ram_own_process_mb": 936,
       "ram_peak_mb": 936,
       "cpu_idle_pct": 0.0
     }
@@ -107,8 +110,8 @@
     "Trurl": {
       "1.5G": "answers in 1 s",
       "1G": "answers in 1 s",
-      "750M": "answers in 12 s",
-      "500M": "answers in 10 s"
+      "750M": "answers in 8 s",
+      "500M": "answers in 16 s"
     },
     "Ollama": {
       "1.5G": "answers in 1 s",
@@ -119,9 +122,111 @@
     "llamafile": {
       "1.5G": "answers in 1 s",
       "1G": "answers in 1 s",
-      "750M": "answers in 5 s",
+      "750M": "answers in 7 s",
       "500M": "answers in 9 s"
     }
   },
+  "trurl_more": [
+    {
+      "app": "Trurl (avx engine)",
+      "disk_mb": 71,
+      "load_s": 1.7,
+      "first_word_s": 1.1,
+      "tokens_per_s": 9.2,
+      "tokens_per_s_range": [
+        8.9,
+        9.3
+      ],
+      "tokens_per_s_all": [
+        9.49,
+        9.13,
+        9.34,
+        9.21,
+        8.79,
+        8.74
+      ],
+      "ram_idle_mb": 904,
+      "ram_own_process_mb": 5,
+      "ram_peak_mb": 905,
+      "cpu_idle_pct": 0.0,
+      "engine": "avx",
+      "model": "gemma-3-1b-it-Q4_K_M.gguf"
+    },
+    {
+      "app": "Trurl (ssse3 engine)",
+      "disk_mb": 71,
+      "load_s": 2.7,
+      "first_word_s": 7.74,
+      "tokens_per_s": 2.0,
+      "tokens_per_s_range": [
+        2.0,
+        2.0
+      ],
+      "tokens_per_s_all": [
+        2.03,
+        2.04,
+        2.03,
+        2.0,
+        2.03,
+        2.03
+      ],
+      "ram_idle_mb": 906,
+      "ram_own_process_mb": 5,
+      "ram_peak_mb": 906,
+      "cpu_idle_pct": 0.05,
+      "engine": "ssse3",
+      "model": "gemma-3-1b-it-Q4_K_M.gguf"
+    },
+    {
+      "app": "Trurl (compat engine)",
+      "disk_mb": 71,
+      "load_s": 2.6,
+      "first_word_s": 8.23,
+      "tokens_per_s": 1.9,
+      "tokens_per_s_range": [
+        1.9,
+        1.9
+      ],
+      "tokens_per_s_all": [
+        2.01,
+        1.68,
+        1.9,
+        1.9,
+        1.9,
+        1.91
+      ],
+      "ram_idle_mb": 906,
+      "ram_own_process_mb": 5,
+      "ram_peak_mb": 906,
+      "cpu_idle_pct": 0.05,
+      "engine": "compat",
+      "model": "gemma-3-1b-it-Q4_K_M.gguf"
+    },
+    {
+      "app": "Trurl",
+      "disk_mb": 71,
+      "load_s": 10.9,
+      "first_word_s": 2.4,
+      "tokens_per_s": 3.9,
+      "tokens_per_s_range": [
+        3.8,
+        4.0
+      ],
+      "tokens_per_s_all": [
+        3.71,
+        3.85,
+        3.74,
+        3.97,
+        3.98,
+        4.1
+      ],
+      "ram_idle_mb": 2786,
+      "ram_own_process_mb": 5,
+      "ram_peak_mb": 2786,
+      "cpu_idle_pct": 0.0,
+      "engine": "avx2",
+      "model": "gemma-3-4b-it-Q4_K_M.gguf"
+    }
+  ],
   "date": "2026-10-13"
 }

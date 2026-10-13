@@ -12,13 +12,15 @@ Bold is the best in each column. For speed, every app whose middle half overlaps
 
 | | App on disk | Load time | First word | Speed | RAM, idle | RAM, answering | CPU, idle |
 |---|---|---|---|---|---|---|---|
-| Trurl | **54 MB** | **1.5 s** | 0.75 s | **9.8 tokens/s (8.8 to 10.1)** | 980 MB | 980 MB | **0.0%** |
-| Ollama | 2,253 MB | 6.8 s | 0.74 s | **10.8 tokens/s (10.1 to 11.2)** | 953 MB | 953 MB | **0.0%** |
-| llamafile | 368 MB | 2.0 s | **0.71 s** | 7.0 tokens/s (6.4 to 7.2) | **936 MB** | **936 MB** | **0.0%** |
+| Trurl | **71 MB** | **1.4 s** | 0.76 s | **11.2 tokens/s (10.5 to 11.9)** | **905 MB** | **905 MB** | **0.0%** |
+| Ollama | 2,253 MB | 6.3 s | 0.62 s | **11.6 tokens/s (10.7 to 12.6)** | 951 MB | 953 MB | **0.0%** |
+| llamafile | 368 MB | 1.9 s | **0.61 s** | 8.0 tokens/s (7.4 to 8.6) | 936 MB | 936 MB | **0.0%** |
 
-- **App on disk:** the program without the model. For Trurl: the terminal app plus its three llama-server builds.
+- **App on disk:** the program without the model. For Trurl: the terminal app plus its four llama-server builds.
 - **Load time:** from starting the app to the first possible answer, model already in the disk cache. Median of the rounds.
-- **Speed:** words (tokens) per second as they appear while the answer streams. All three apps compute with the same library (ggml). Measured separately with the engines' own timers, Trurl's llama-server and Ollama both compute this model at about 11.7 tokens/s here; Ollama 0.40 runs Gemma 3 with its own engine and streams it a little faster. Trurl itself adds no delay: the first word reaches the learner as fast as from llama-server alone.
+- **Speed:** words (tokens) per second as they appear while the answer streams. All three apps compute with the same library (ggml); Ollama 0.40 runs Gemma 3 with its own engine and streams it a little faster.
+- **Trurl** here is Trurl's core and its model engine, without a window: what the terminal app runs (the test drives it through the core's development bridge). The Windows window adds Microsoft's WebView2: the Windows smoke test in CI prints its memory.
+- **App's own process** (in the JSON, `ram_own_process_mb`): the app without its model engine.
 - **RAM:** proportional set size (PSS) of every process of the app, so shared pages count once. The model's 806 MB of weights are memory-mapped and counted here.
 - **CPU, idle:** with the model loaded and nothing asked, over 20 seconds. Anything above 0% drains a laptop battery for nothing.
 
@@ -28,14 +30,26 @@ Each app started inside a memory limit (cgroup, no swap), then asked to answer o
 
 | Memory left for the app | 1.5G | 1G | 750M | 500M |
 |---|---|---|---|---|
-| Trurl | answers in 1 s | answers in 1 s | answers in 12 s | answers in 10 s |
+| Trurl | answers in 1 s | answers in 1 s | answers in 8 s | answers in 16 s |
 | Ollama | answers in 1 s | answers in 1 s | does not start | does not start |
-| llamafile | answers in 1 s | answers in 1 s | answers in 5 s | answers in 9 s |
+| llamafile | answers in 1 s | answers in 1 s | answers in 7 s | answers in 9 s |
+
+## Older computers, and a bigger model
+
+Trurl on the same computer with the engine an older CPU would get (avx: Sandy Bridge and Ivy Bridge, 2011 to 2012; ssse3: Core 2 and first Core i, 2006 to 2010; compat: any 64-bit CPU), and with Gemma 3 4B. The bundled Q4_K_M model is slow on ssse3 and compat; Q4_0 models answer about four times faster on ssse3 and a third faster on compat (docs/ARCHITECTURE.md). An older CPU is also slower in itself, so expect less on a real one; the order of the engines stays the same.
+
+| Trurl | Model | Load time | First word | Speed | RAM, answering |
+|---|---|---|---|---|---|
+| avx engine | `gemma-3-1b-it-Q4_K_M.gguf` | 1.7 s | 1.1 s | 9.2 tokens/s | 905 MB |
+| ssse3 engine | `gemma-3-1b-it-Q4_K_M.gguf` | 2.7 s | 7.7 s | 2.0 tokens/s | 906 MB |
+| compat engine | `gemma-3-1b-it-Q4_K_M.gguf` | 2.6 s | 8.2 s | 1.9 tokens/s | 906 MB |
+| avx2 engine | `gemma-3-4b-it-Q4_K_M.gguf` | 10.9 s | 2.4 s | 3.9 tokens/s | 2,786 MB |
 
 ## Reproduce
 
 ```
 python3 scripts/benchmark.py --model ~/.cache/trurl/models/gemma-3-1b-it-Q4_K_M.gguf \
-    --ollama /path/to/ollama --llamafile /path/to/llamafile --json docs/benchmarks.json
+    --ollama /path/to/ollama --llamafile /path/to/llamafile --json docs/benchmarks.json \
+    --tiers --big-model ~/.cache/trurl/models/gemma-3-4b-it-Q4_K_M.gguf
 python3 scripts/benchmark.py --render docs/benchmarks.json
 ```

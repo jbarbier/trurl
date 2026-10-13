@@ -14,5 +14,6 @@ step "pins";         python3 scripts/check_pins.py
 step "copy";         python3 scripts/check_copy.py
 step "network";      python3 scripts/check_network.py
 step "ui math";      node apps/desktop/ui/plainmath.test.cjs
+step "isa patterns"; python3 scripts/check_cpu_isa.py --self-test
 echo
 echo "gates: all passed"

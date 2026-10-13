@@ -8,7 +8,7 @@ Why from source instead of the official release zips:
 Our builds are single static executables: no DLLs, no C++ runtime, no OpenSSL,
 no OpenMP. Nothing to install, nothing to go missing.
 
-Three CPU tiers, picked by Trurl at startup (crates/trurl-core/src/hardware.rs):
+Four CPU tiers, picked by Trurl at startup (crates/trurl-core/src/hardware.rs):
   avx2    Haswell (2013) and newer: AVX2 + FMA + F16C + BMI2
   avx     Sandy Bridge / Ivy Bridge (2011-2012): AVX only
   ssse3   Core 2, first Core i3/i5/i7, Atom, AMD Bobcat (2006-2010): SSSE3, no AVX
@@ -130,12 +130,20 @@ def build(src: Path, build_root: Path, variant: str, cmake: str, jobs: int, os_n
         args += ["-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc"]
     env = dict(os.environ)
     extra = VARIANT_CFLAGS.get(variant, {}).get(os_name)
+    # CMake reads CFLAGS only when it first configures a folder. If the flags
+    # changed since (or the folder predates this record), forget the cached
+    # configuration, or the new flags would be silently ignored.
+    record = bdir / "trurl-cflags.txt"
+    if (bdir / "CMakeCache.txt").exists() and (not record.exists() or record.read_text() != (extra or "")):
+        print(f"+ {variant}: compiler flags changed, configuring again", flush=True)
+        (bdir / "CMakeCache.txt").unlink()
     if extra:
         env["CFLAGS"] = (env.get("CFLAGS", "") + " " + extra).strip()
         env["CXXFLAGS"] = (env.get("CXXFLAGS", "") + " " + extra).strip()
         print(f"+ CFLAGS={env['CFLAGS']!r}", flush=True)
     print("+", " ".join(args), flush=True)
     subprocess.run(args, check=True, env=env)
+    record.write_text(extra or "")
     subprocess.run([cmake, "--build", str(bdir), "--config", "Release", "--target", "llama-server", "-j", str(jobs)], check=True)
     exe = "llama-server.exe" if os_name == "windows" else "llama-server"
     for cand in [bdir / "bin" / "Release" / exe, bdir / "bin" / exe]:
@@ -169,7 +177,12 @@ def main() -> None:
         dest.mkdir(parents=True, exist_ok=True)
         target = dest / exe.name
         shutil.copy2(exe, target)
-        manifest["variants"][v] = {"flags": VARIANTS[v], "sha256": sha256(target), "size": target.stat().st_size}
+        manifest["variants"][v] = {
+            "flags": VARIANTS[v],
+            "cflags": VARIANT_CFLAGS.get(v, {}).get(os_name, ""),
+            "sha256": sha256(target),
+            "size": target.stat().st_size,
+        }
         print(f"{v}: {target} ({target.stat().st_size // 1024} KB)", flush=True)
     shutil.copy2(src / "LICENSE", out_root / "LICENSE-llama.cpp.txt")
     manifest["common_flags"] = COMMON

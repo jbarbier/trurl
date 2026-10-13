@@ -42,6 +42,8 @@ jobs:
       - name: Math shown as text in the desktop UI (same cases as the terminal app)
         run: node apps/desktop/ui/plainmath.test.cjs
       - run: python3 scripts/check_network.py
+      - name: The CPU checker's patterns catch each instruction set (gcc-compiled samples)
+        run: python3 scripts/check_cpu_isa.py --self-test
 
   linux:
     name: Linux evals (real llama-server, network blocked) and UI e2e

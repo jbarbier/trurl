@@ -260,8 +260,36 @@ if (SUITE === "full") {
     await page.locator(".files tbody tr").first().waitFor({ timeout: 30000 });
     await page.waitForTimeout(500);
     await shot(page, "hf-details");
+    // This test computer has AVX2: Q4_K_M, and no claim about Q4_0 speed.
+    const legend = await page.locator(".quant-legend").innerText();
+    if (!legend.includes("The recommended one, Q4_K_M, is listed first.")) throw new Error(`legend: ${legend}`);
+    const first = await page.locator(".files tbody tr").first().innerText();
+    if (!/Q4_K_M[\s\S]*Recommended/.test(first)) throw new Error(`first file row: ${first}`);
     await closeDialogs();
   });
+
+  if (!CDP)
+    await step("Hugging Face on a 2008 laptop recommends Q4_0 and says why (mock core)", async () => {
+      // The real core picks by this computer's processor; the mock plays an SSSE3 one.
+      const ui = new URL("../../desktop/ui/index.html?mock&scenario=oldcpu", import.meta.url).href;
+      const p = await browser.newPage({ viewport: { width: W, height: H } });
+      try {
+        await p.goto(ui);
+        await p.click("#openModels");
+        await p.click("#tabHub");
+        await p.fill("#hubQuery", "qwen");
+        await p.keyboard.press("Enter");
+        await p.locator(".hit").first().click({ timeout: 10000 });
+        await p.locator(".files tbody tr").first().waitFor({ timeout: 10000 });
+        const legend = await p.locator(".quant-legend").innerText();
+        if (!legend.includes("On this computer's processor, Q4_0 files answer fastest")) throw new Error(`legend: ${legend}`);
+        const first = await p.locator(".files tbody tr").first().innerText();
+        if (!/Q4_0[\s\S]*Recommended/.test(first)) throw new Error(`first file row: ${first}`);
+        await shot(p, "hf-details-oldcpu");
+      } finally {
+        await p.close();
+      }
+    });
 
   await step("about and licenses", async () => {
     await page.click("#openAbout");
