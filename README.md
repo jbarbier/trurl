@@ -53,14 +53,19 @@ stick's `models` folder. No administrator password is needed. To make the stick,
 | Computer | Download | Then |
 |---|---|---|
 | Windows 10 or 11 (64-bit) | `Trurl_<version>_x64-setup.exe` (12 MB) | Double-click. Then download models from inside Trurl, or import them. |
+
+Trurl needs 64-bit Windows. Many older laptops were set up with 32-bit Windows 10: to
+check, open **Settings**, **System**, **About**, and read **System type**.
 | Linux (64-bit) | `trurl-<version>-linux-x64.tar.gz` | `tar xzf trurl-*.tar.gz && sh trurl-*/install.sh`, then run `trurl`. If it is not found, log out and back in once, or run `~/.local/bin/trurl`. |
 
 Until the first release is published, the Windows installer built for every change
 is in [GitHub Actions](https://github.com/jbarbier/trurl/actions/workflows/ci.yml):
-open the latest run and download `windows-installer-and-screenshots`.
+open the latest run and download `windows-installer-and-screenshots`. This needs a
+GitHub account (free), and GitHub deletes these files after 90 days.
 
 Windows may say "Windows protected your PC" the first time: click **More info**,
-then **Run anyway**. The installer is not code-signed yet; updates are signed. On a
+then **Run anyway**. The installer does not carry a Microsoft-recognised signature
+yet (updates are checked against Trurl's own key, which is a different thing). On a
 Windows 11 computer with **Smart App Control** on, an unsigned installer is blocked
 outright; [docs/USB-BUNDLE.md](docs/USB-BUNDLE.md#on-the-learners-computer) explains
 the choice.
@@ -143,7 +148,7 @@ When the computer is online, the **Hugging Face** tab of the Models screen searc
   parameters it has, its model card, and every file.
 - **Files.** Each file is the same model at a different size (its quantization, like
   Q4_K_M or Q8_0), with its memory fit. One is marked **Recommended** and listed
-  first: Q4_K_M, or Q4_0 on a processor from before 2011 (it answers faster there).
+  first: Q4_K_M, or Q4_0 on a 2006 to 2010 processor (it answers faster there).
 - **Download.** Click **Download** on a file.
 
 Downloads survive bad connections:
@@ -207,11 +212,12 @@ when it starts:
 - **AVX2:** Haswell, 2013, and newer.
 - **AVX:** Sandy Bridge and Ivy Bridge, 2011 to 2012, common in second-hand laptops.
 - **SSSE3:** Core 2 and the first Core i3/i5/i7, 2006 to 2010, and Atom netbooks. On
-  these, models in the Q4_0 format answer about four times faster than Q4_K_M:
-  the Hugging Face screen recommends Q4_0 files there.
+  these, models in the Q4_0 format answer two to four times faster than Q4_K_M and
+  read your message about five times faster: the Hugging Face screen recommends
+  Q4_0 files there, and [docs/USB-BUNDLE.md](docs/USB-BUNDLE.md#a-stick-for-2006-to-2010-laptops)
+  shows how to put them on a stick.
 - **Compatible:** anything older (Pentium 4, Athlon 64, AMD Phenom). It is slow
-  (about 2 words per second for Gemma 3 1B, a third more with Q4_0, which the
-  Hugging Face screen recommends there too), but it runs.
+  (2 to 3 tokens per second with the small models), but it runs.
 
 Each engine contains only the instructions of its processors, which
 `scripts/check_cpu_isa.py` proves on every build, and each one answers on an
@@ -270,7 +276,7 @@ A small cloud computer (2 AMD EPYC cores with AVX2), 2 threads, 7.8 GB RAM, no G
 | Ollama | answers in 1 s | answers in 1 s | does not start | does not start |
 | llamafile | answers in 1 s | answers in 1 s | answers in 7 s | answers in 9 s |
 
-**Older computers, and a bigger model.** The same computer, running the engine an older CPU would get (avx: 2011 to 2012 processors; ssse3: 2006 to 2010; compat: anything older), and Gemma 3 4B. On ssse3 and compat, models in the Q4_0 format answer faster than these Q4_K_M ones: about four times on ssse3, a third on compat (docs/ARCHITECTURE.md).
+**Older computers, and a bigger model.** The same computer, running the engine an older CPU would get (avx: 2011 to 2012 processors; ssse3: 2006 to 2010; compat: anything older), and Gemma 3 4B. On ssse3, models in the Q4_0 format answer two to four times faster than these Q4_K_M ones (docs/ARCHITECTURE.md).
 
 | Trurl | Model | Load time | First word | Speed | RAM, answering |
 |---|---|---|---|---|---|
@@ -294,7 +300,7 @@ to make one, with the three models, and how to add your own.
 |---|---|
 | Temperature 0 gives the same answer twice | Slide temperature to 0.0. |
 | A pre-trained model that never stops (1.1.2) | Import its `.gguf`; it runs without a chat template; **Stop** ends it. |
-| Watch thinking live, stop it (1.2.3, 1.3.4) | Pick Qwen3 0.6B. On a slow computer it can think for minutes (1 to 3 on the 2-core test machine); **Stop** or **Esc** at any moment. |
+| Watch thinking live, stop it (1.2.3, 1.3.4) | Pick Qwen3 0.6B. It can think for minutes: 1 to 3 on the 2-core test machine (a recent processor), several times longer on a 2006 to 2010 laptop (use the Q4_0 file there, see [docs/USB-BUNDLE.md](docs/USB-BUNDLE.md#a-stick-for-2006-to-2010-laptops)). **Stop** or **Esc** at any moment. |
 | `/no_think` (1.3.4, 1.4.3) | Type it in the message; the thinking block stays empty. |
 | Run out of context (1.3.2) | Set **Context size** to 256, the smallest. llama.cpp rounds any context up to a multiple of 256, so the course's 200 behaves exactly like 256. |
 | Paste a whole web page (1.4.3) | Set **Context size** to 4,096 first: 2,048 tokens is about 1,500 words. |
@@ -350,7 +356,7 @@ Trurl is a small Rust program around [llama.cpp](https://github.com/ggml-org/lla
   Trurl closes, even if Trurl crashes (tested on Linux by killing Trurl in CI, and on
   Windows by the smoke test, which ends Trurl the way a crash would).
 - **Low-RAM settings.** One conversation at a time, no prompt cache, no second
-  copy of the weights (`--no-repack`: Gemma 3 4B needs 2.65 GB instead of 4.1 GB), threads =
+  copy of the weights (`--no-repack`: Gemma 3 4B needs about 2.8 GB instead of 4.3 GB), threads =
   physical cores, memory-mapped weights.
 - **Chat template and reasoning.** The model's own chat template comes from its
   file. Reasoning is separated by llama-server, with a fallback for raw `<think>`

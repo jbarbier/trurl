@@ -36,7 +36,7 @@ Each app started inside a memory limit (cgroup, no swap), then asked to answer o
 
 ## Older computers, and a bigger model
 
-Trurl on the same computer with the engine an older CPU would get (avx: Sandy Bridge and Ivy Bridge, 2011 to 2012; ssse3: Core 2 and first Core i, 2006 to 2010; compat: any 64-bit CPU), and with Gemma 3 4B. The bundled Q4_K_M model is slow on ssse3 and compat; Q4_0 models answer about four times faster on ssse3 and a third faster on compat (docs/ARCHITECTURE.md). An older CPU is also slower in itself, so expect less on a real one; the order of the engines stays the same.
+Trurl on the same computer with the engine an older CPU would get (avx: Sandy Bridge and Ivy Bridge, 2011 to 2012; ssse3: Core 2 and first Core i, 2006 to 2010; compat: any 64-bit CPU), and with Gemma 3 4B. The bundled Q4_K_M model is slow on ssse3 and compat; on ssse3, Q4_0 models answer two to four times faster (docs/ARCHITECTURE.md). An older CPU is also slower in itself, so expect less on a real one; the order of the engines stays the same.
 
 | Trurl | Model | Load time | First word | Speed | RAM, answering |
 |---|---|---|---|---|---|

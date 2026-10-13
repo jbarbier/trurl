@@ -56,25 +56,29 @@ OpenSSL 3 on Linux. Many classroom computers do not have those.
 | `compat` | SSE2 | any 64-bit Intel or AMD CPU (Pentium 4, Athlon 64, AMD Phenom) |
 
 **Why an SSSE3 build.** llama.cpp has fast SSSE3 code for the Q4_0 and Q8_0 formats
-and none for the K formats (Q4_K_M). Measured on one computer, Gemma 3 1B with each
-engine (words per second while answering / while reading the prompt):
+and none for the K formats (Q4_K_M). Measured on one computer with each engine
+(tokens per second while answering / while reading the prompt; a token is about
+three quarters of an English word):
 
-| Engine | Q4_K_M | Q4_0 (QAT) |
-|---|---|---|
-| compat | 2.1 / 2.6 | 2.8 / 3.5 |
-| ssse3 | 2.0 / 2.6 | 8.2 / 16.6 |
-| avx | 10.0 / 17.9 | 12.0 / 22.2 |
-| avx2 | 12.9 / 32.6 | 13.5 / 35.6 |
+| Engine | Gemma 3 1B Q4_K_M | Gemma 3 1B Q4_0 (QAT) | Qwen3 0.6B Q4_K_M | Qwen3 0.6B Q4_0 |
+|---|---|---|---|---|
+| compat | 2.1 / 2.6 | 2.8 / 3.5 | 3.4 / 5.0 | 3.4 / 5.6 |
+| ssse3 | 2.0 / 2.6 | **8.2 / 16.6** | 3.6 / 5.2 | **7.4 / 24.3** |
+| avx | 10.0 / 17.9 | 12.0 / 22.2 | 21.8 / 42.4 | 15.5 / 37.3 |
+| avx2 | 12.9 / 32.6 | 13.5 / 35.6 | 29.4 / 64.9 | 21.5 / 59.5 |
 
 (2-core AMD EPYC cloud computer, 2 threads, short prompts, temperature 0, each
-engine forced on the same machine.)
+engine forced on the same machine. The Gemma Q4_0 file is Google's
+quantization-aware one, `ggml-org/gemma-3-1b-it-qat-GGUF`; the Qwen files are both
+from `bartowski/Qwen_Qwen3-0.6B-GGUF`.)
 
-So with the ssse3 and compat builds, the Hugging Face screen recommends the Q4_0 file
-of a model when there is one (`hub::recommend`), and Q4_K_M otherwise. With AVX both
-formats have fast code and Q4_0 gains only a fifth, not worth its lower quality, so
-AVX and AVX2 get Q4_K_M, what the course uses. The choice follows the build that
-actually runs (after a crash that is a slower one), not the detected processor. The
-bundled models stay Q4_K_M, as pinned.
+So with the ssse3 build, and only there, the Hugging Face screen recommends the Q4_0
+file of a model when there is one (`hub::recommend`). On compat neither format has
+fast code (Qwen3 runs at the same speed), and on AVX and AVX2 Q4_K_M is as fast or
+faster: Q4_0's lower quality buys nothing, so they get Q4_K_M, what the course uses.
+The choice follows the build that actually runs (after a crash that is a slower
+one), not the detected processor. The bundled models stay Q4_K_M, as pinned; a stick
+for 2006 to 2010 laptops can carry the Q4_0 files instead (docs/USB-BUNDLE.md).
 
 How the build is picked and kept honest:
 

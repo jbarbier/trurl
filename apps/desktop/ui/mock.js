@@ -134,7 +134,7 @@
     ];
     const README = "# Qwen3 0.6B (GGUF)\n\nQuantized by **bartowski** with llama.cpp.\n\nQwen3 is a family of models that can **think** before answering. Add `/no_think` to your message to turn thinking off.\n\n## Which file should I pick?\n\n| File | Size | Notes |\n|---|---|---|\n| Q4_K_M | 484 MB | Good balance, recommended |\n| Q8_0 | 805 MB | Highest quality |\n\n## License\n\nApache 2.0.";
     function details(repo) {
-      // As hub::recommend: Q4_0 first on the ssse3 and compat engines, Q4_K_M otherwise.
+      // As hub::recommend: Q4_0 first on the ssse3 engine, Q4_K_M otherwise.
       const q40 = scenario === "oldcpu";
       const files = [
         { path: "Qwen_Qwen3-0.6B-Q4_K_M.gguf", size: 484220320, sha256: "b".repeat(64), quant: "Q4_K_M", fit: "green", split: false, recommended: !q40 },

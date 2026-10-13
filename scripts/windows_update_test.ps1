@@ -3,7 +3,10 @@
 #   2. install N, add a model the way a learner would;
 #   3. build N+1, sign it, publish latest.json on localhost;
 #   4. start N, click "Update now" in the real window, let it install;
-#   5. check N+1 is installed and runs, and the model is still there.
+#   5. check N+1 is installed and runs, and the model is still there;
+#   6. a teacher's update with no internet: build N+2 and run its installer over
+#      N+1 from a "stick" folder with a models folder next to it. The model
+#      already there stays, a new one is copied, N+2 runs.
 # If 0.1.0's updater were broken, no later release could fix it remotely: this
 # test is what makes the first release safe to ship.
 $ErrorActionPreference = "Stop"
@@ -32,6 +35,7 @@ $conf = Join-Path $work "update-test.conf.json"
 $vN = (Get-Content pins.json | ConvertFrom-Json).app.version
 $parts = $vN.Split(".")
 $vNext = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
+$vNext2 = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 2)"
 
 Step "Build version $vN"
 Push-Location apps/desktop
@@ -108,8 +112,40 @@ try {
   if ($LASTEXITCODE -ne 0) { Pop-Location; throw "version $vNext does not work after the update" }
   Pop-Location
   Stop-Process -Id $proc.Id -ErrorAction SilentlyContinue
+
+  Step "A class with no internet: install $vNext2 over $vNext from a stick folder"
+  python scripts/bump_version.py $vNext2
+  "## $vNext2`n`nTest release made by scripts/windows_update_test.ps1." | Add-Content CHANGELOG.md
+  Push-Location apps/desktop
+  & $tauri build --config $conf -- --locked
+  Pop-Location
+  $stick = Join-Path $work "stick"
+  New-Item -ItemType Directory -Force (Join-Path $stick "models") | Out-Null
+  $setup2 = Join-Path $stick "Trurl_${vNext2}_x64-setup.exe"
+  Copy-Item "target/release/bundle/nsis/Trurl_${vNext2}_x64-setup.exe" $setup2
+  # The model the laptop already has (same size: skipped), and one it does not.
+  Copy-Item (Join-Path $env:TRURL_TEST_MODELS "Qwen_Qwen3-0.6B-Q4_K_M.gguf") (Join-Path $stick "models")
+  $extra = Join-Path $stick "models\class-extra.gguf"
+  [IO.File]::WriteAllBytes($extra, [byte[]](71, 71, 85, 70) + (New-Object byte[] 4092))
+  $before = (Get-Item (Join-Path $models "Qwen_Qwen3-0.6B-Q4_K_M.gguf")).LastWriteTimeUtc
+  Get-Process trurl -ErrorAction SilentlyContinue | Stop-Process -Force
+  Start-Sleep -Seconds 3
+  Start-Process $setup2 -ArgumentList "/S" -Wait
+  $v = (Get-Item $app).VersionInfo.ProductVersion
+  if (-not ($v -and $v.StartsWith($vNext2))) { throw "installing $vNext2 over $vNext left version $v" }
+  $kept = Get-Item (Join-Path $models "Qwen_Qwen3-0.6B-Q4_K_M.gguf") -ErrorAction SilentlyContinue
+  if (-not $kept) { throw "installing over the old version deleted the model" }
+  if ($kept.LastWriteTimeUtc -ne $before) { throw "the model already there was copied again" }
+  if (-not (Test-Path (Join-Path $models "class-extra.gguf"))) { throw "the new model on the stick was not copied" }
+  if (Get-ChildItem $models -Filter *.part) { throw "a .part file was left in the models folder" }
+  $proc = Start-Process $app -PassThru
+  Push-Location apps/bridge/e2e
+  node run.mjs --cdp http://127.0.0.1:9222 --suite after-update --expect-version $vNext2 --out $out
+  if ($LASTEXITCODE -ne 0) { Pop-Location; throw "version $vNext2 does not work after installing it over $vNext" }
+  Pop-Location
+  Stop-Process -Id $proc.Id -ErrorAction SilentlyContinue
 } finally {
   Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
   git checkout -- pins.json Cargo.toml Cargo.lock apps/desktop/src-tauri/tauri.conf.json CHANGELOG.md
 }
-Write-Host "`nUPDATE TEST PASSED: $vN -> $vNext, model kept"
+Write-Host "`nUPDATE TEST PASSED: $vN -> $vNext by the updater, -> $vNext2 by hand from a stick, models kept"

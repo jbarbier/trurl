@@ -1203,11 +1203,11 @@
     renderFiles();
   }
 
-  // Same rule as hub::recommend: Q4_0 is the fast format on the ssse3 and compat builds only.
+  // Same rule as hub::recommend: Q4_0 is the fast format on the ssse3 build only.
   function quantLegend(files, variant) {
     const rec = (files.find((f) => f.recommended) || {}).quant;
     const base = "The version name says how much the model was squeezed: Q4 keeps about 4 bits per number (small, good), Q8 keeps 8 (twice the size, a little more exact). Names starting with IQ or UD are other ways of squeezing.";
-    if (rec === "Q4_0" && (variant === "ssse3" || variant === "compat")) return base + " On this computer's processor, Q4_0 files answer fastest: the recommended one is listed first.";
+    if (rec === "Q4_0" && variant === "ssse3") return base + " On this computer's processor, Q4_0 files answer fastest: the recommended one is listed first.";
     if (rec) return base + ` The recommended one, ${rec}, is listed first.`;
     return base;
   }

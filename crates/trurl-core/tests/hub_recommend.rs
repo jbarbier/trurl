@@ -69,7 +69,7 @@ async fn the_build_that_runs_decides_not_the_processor() {
     );
     assert_eq!(
         recommended_with(Some(CpuVariant::Compat)).await,
-        "tiny-Q4_0.gguf"
+        "tiny-Q4_K_M.gguf"
     );
     let detected = trurl_core::hardware::CpuFeatures::detect().variant();
     if detected >= CpuVariant::Avx {
@@ -82,10 +82,10 @@ async fn the_build_that_runs_decides_not_the_processor() {
 
 #[tokio::test]
 async fn without_a_cap_the_processor_decides() {
-    let want = if trurl_core::hardware::CpuFeatures::detect().variant() >= CpuVariant::Avx {
-        "tiny-Q4_K_M.gguf"
-    } else {
+    let want = if trurl_core::hardware::CpuFeatures::detect().variant() == CpuVariant::Ssse3 {
         "tiny-Q4_0.gguf"
+    } else {
+        "tiny-Q4_K_M.gguf"
     };
     assert_eq!(recommended_with(None).await, want);
 }

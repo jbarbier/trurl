@@ -161,7 +161,7 @@ jobs:
           if-no-files-found: ignore
 
   windows-update:
-    name: Windows self-update, version N to N+1, models kept
+    name: Windows updates (N to N+1 by the updater, N+2 by hand from a stick), models kept
     runs-on: windows-2022
     defaults:
       run:

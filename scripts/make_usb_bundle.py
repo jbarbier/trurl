@@ -156,6 +156,15 @@ def main() -> None:
     readme = (ROOT / "docs" / "USB-READ-ME-FIRST.txt").read_text()
     marker = "  models/             "
     lines = [(marker + listing) if l.startswith(marker) else l for l in readme.splitlines()]
+    # List only what this stick holds.
+    if not (out / "linux").exists():
+        lines = [l for l in lines if not l.startswith("  linux/")]
+    if not any(out.glob("*-offline-setup.exe")):
+        lines = [l for l in lines if not l.startswith("  Trurl_")]
+        # A stick for Linux computers only: no Windows steps.
+        start = lines.index("ON A WINDOWS 10 OR 11 COMPUTER")
+        end = next(i for i, l in enumerate(lines) if l.startswith("ON A LINUX COMPUTER"))
+        lines = lines[:start] + lines[end:]
     (out / "READ-ME-FIRST.txt").write_text("\n".join(lines) + "\n")
 
     sums = []

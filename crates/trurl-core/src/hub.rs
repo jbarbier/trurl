@@ -303,19 +303,19 @@ pub fn chat_kind(pipeline_tag: Option<&str>, id: &str) -> Option<bool> {
 }
 
 /// Mark the one file to pick with the llama-server build `variant`, and list
-/// it first. Q4_K_M (small, good, what the course uses), except on the ssse3 and
-/// compat builds: llama.cpp has SSSE3 code for Q4_0 and none for the K formats,
-/// so there Q4_0 answers about four times faster on SSSE3 and a third faster on
-/// compat (Gemma 3 1B, words per second: 8.2 against 2.0, 2.8 against 2.1). On
-/// AVX both formats have fast code and Q4_0 gains only a fifth, not worth its
-/// lower quality.
+/// it first. Q4_K_M (small, good, what the course uses), except on the ssse3
+/// build: llama.cpp has SSSE3 code for Q4_0 and none for the K formats, so there
+/// Q4_0 answers two to four times faster and reads the prompt about five times
+/// faster (docs/ARCHITECTURE.md: Gemma 3 1B and Qwen3 0.6B measured). On compat
+/// neither format has fast code (Qwen3 0.6B: the same speed), and on AVX and
+/// AVX2 Q4_K_M is as fast or faster: Q4_0's lower quality buys nothing there.
 pub fn recommend(files: &mut [RepoFile], variant: crate::hardware::CpuVariant) {
     use crate::hardware::CpuVariant;
     let ok = |f: &RepoFile, q: &str| !f.split && f.quant.as_deref() == Some(q);
-    let order: &[&str] = if variant >= CpuVariant::Avx {
-        &["Q4_K_M", "Q4_0"]
-    } else {
+    let order: &[&str] = if variant == CpuVariant::Ssse3 {
         &["Q4_0", "Q4_K_M"]
+    } else {
+        &["Q4_K_M", "Q4_0"]
     };
     for f in files.iter_mut() {
         f.recommended = false;
@@ -487,7 +487,7 @@ mod tests {
             (CpuVariant::Avx2, "Q4_K_M"),
             (CpuVariant::Avx, "Q4_K_M"),
             (CpuVariant::Ssse3, "Q4_0"),
-            (CpuVariant::Compat, "Q4_0"),
+            (CpuVariant::Compat, "Q4_K_M"),
         ] {
             let mut files = all.clone();
             recommend(&mut files, variant);
@@ -498,7 +498,7 @@ mod tests {
         }
         // No Q4_0 in the repo: Q4_K_M all the same; no Q4_K_M: Q4_0 on AVX2.
         let mut files = vec![file("Q2_K", false), file("Q4_K_M", false)];
-        recommend(&mut files, CpuVariant::Compat);
+        recommend(&mut files, CpuVariant::Ssse3);
         assert_eq!(pick(&files).as_deref(), Some("Q4_K_M"));
         let mut files = vec![file("Q8_0", false), file("Q4_0", false)];
         recommend(&mut files, CpuVariant::Avx2);
