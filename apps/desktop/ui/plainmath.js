@@ -13,6 +13,8 @@
     to: "→", rightarrow: "→", Rightarrow: "⇒", implies: "⇒", leftarrow: "←", iff: "⇔",
     ldots: "…", dots: "…", cdots: "…", degree: "°", circ: "°", percent: "%",
     sum: "Σ", prod: "Π", in: "∈", cup: "∪", cap: "∩", forall: "∀", exists: "∃",
+    lfloor: "⌊", rfloor: "⌋", lceil: "⌈", rceil: "⌉", angle: "∠", triangle: "△",
+    perp: "⊥", parallel: "∥", therefore: "∴", notin: "∉", subset: "⊂", emptyset: "∅",
     quad: " ", qquad: "  ", ",": " ", ";": " ", "!": "", " ": " ",
   };
   const SUP = { 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹", "+": "⁺", "-": "⁻", n: "ⁿ" };
@@ -47,7 +49,7 @@
         const name = m ? m[1] : "";
         i += m ? m[0].length : 1;
         // Commands that take a {group} ignore the spaces before it.
-        if (["frac", "dfrac", "tfrac", "sqrt", "boxed", "text", "textbf", "mathrm", "mathbf", "operatorname", "mbox", "textit", "mathit", "left", "right"].includes(name))
+        if (["frac", "dfrac", "tfrac", "binom", "sqrt", "boxed", "text", "textbf", "mathrm", "mathbf", "mathbb", "mathcal", "vec", "hat", "bar", "overline", "operatorname", "mbox", "textit", "mathit", "left", "right", "begin", "end"].includes(name))
           while (src[i] === " ") i++;
         if (name === "frac" || name === "dfrac" || name === "tfrac") {
           let a = "", b = "";
@@ -56,12 +58,22 @@
           a = convert(a);
           b = convert(b);
           out += (needsParens(a) ? "(" + a + ")" : a) + "/" + (needsParens(b) ? "(" + b + ")" : b);
+        } else if (name === "binom") {
+          let a = "", b = "";
+          if (src[i] === "{") [a, i] = group(src, i);
+          if (src[i] === "{") [b, i] = group(src, i);
+          out += "C(" + convert(a) + ", " + convert(b) + ")";
+        } else if (name === "begin" || name === "end") {
+          // \begin{aligned} … \end{aligned}: the lines inside are what matters.
+          if (src[i] === "{") i = group(src, i)[1];
+        } else if (name === "\\") {
+          out += "\n";
         } else if (name === "sqrt") {
           let a = "";
           if (src[i] === "{") [a, i] = group(src, i);
           a = convert(a);
           out += "√" + (needsParens(a) ? "(" + a + ")" : a);
-        } else if (["boxed", "text", "textbf", "mathrm", "mathbf", "operatorname", "mbox", "textit", "mathit"].includes(name)) {
+        } else if (["boxed", "text", "textbf", "mathrm", "mathbf", "mathbb", "mathcal", "vec", "hat", "bar", "overline", "operatorname", "mbox", "textit", "mathit"].includes(name)) {
           let a = "";
           if (src[i] === "{") [a, i] = group(src, i);
           out += name === "text" || name === "mbox" ? a : convert(a);
@@ -78,8 +90,14 @@
         i++;
         let a;
         if (src[i] === "{") [a, i] = group(src, i);
-        else a = src[i++] || "";
-        out += sup(convert(a));
+        else if (src[i] === "\\") {
+          // ^\circ: the whole command, not just its backslash.
+          const m = /^\\([A-Za-z]+|.)/.exec(src.slice(i));
+          a = m ? m[0] : "\\";
+          i += a.length;
+        } else a = src[i++] || "";
+        const x = convert(a);
+        out += x === "°" ? "°" : sup(x);
       } else if (c === "_") {
         i++;
         let a;
@@ -96,8 +114,9 @@
       }
     }
     return out
-      .replace(/([([{])\s+/g, "$1")
-      .replace(/\s+([)\]}])/g, "$1")
+      .replace(/([([{⌊⌈])[ \t]+/g, "$1")
+      .replace(/[ \t]+([)\]}⌋⌉])/g, "$1")
+      .replace(/ *\n */g, "\n")
       .replace(/ {2,}/g, " ")
       .trim();
   }

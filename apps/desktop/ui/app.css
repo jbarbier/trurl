@@ -368,7 +368,7 @@ input[type="range"]::-moz-range-thumb {
   display: flex; align-items: center; gap: 10px; width: 100%;
   min-height: 44px; padding: 0 14px;
   background: none; border: 0; border-radius: var(--r-s);
-  color: var(--ink2); font-family: var(--mo); font-size: 14px; font-weight: 600; text-align: left;
+  color: var(--ink2); font-family: var(--mo); font-size: 16px; font-weight: 600; text-align: left;
 }
 .think-ind:empty { display: none; }
 .think-toggle .chev { margin-left: auto; transition: transform .2s var(--ease); }
@@ -590,7 +590,7 @@ input[type="range"]::-moz-range-thumb {
 .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; margin: 0; }
 .facts div { padding: 10px 12px; background: var(--near); border: var(--bw) solid var(--hair); border-radius: var(--r-s); min-width: 0; }
 .facts dt { font-family: var(--mo); font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink3); }
-.facts dd { margin: 2px 0 0; font-family: var(--mo); font-variant-numeric: tabular-nums; font-size: 14px; overflow-wrap: anywhere; }
+.facts dd { margin: 2px 0 0; font-family: var(--mo); font-variant-numeric: tabular-nums; font-size: 16px; overflow-wrap: anywhere; }
 .tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .files { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--near); border: var(--bw) solid var(--hair); border-radius: var(--r-s); overflow: hidden; }
 .files th { font-family: var(--mo); font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink3); text-align: left; padding: 10px 14px; background: var(--far); border-bottom: var(--bw) solid var(--hair); }
@@ -598,11 +598,11 @@ input[type="range"]::-moz-range-thumb {
 .files tr:last-child td { border-bottom: 0; }
 .files .q { font-family: var(--mo); font-weight: 600; }
 .files .rec { margin-left: 8px; vertical-align: 2px; }
-.files .p { display: block; font-family: var(--mo); font-size: 12px; color: var(--ink3); overflow-wrap: anywhere; }
+.files .p { display: block; font-family: var(--mo); font-size: 14px; color: var(--ink3); overflow-wrap: anywhere; }
 .files .num { font-size: 14px; white-space: nowrap; }
 .files td:last-child { text-align: right; white-space: nowrap; }
 .files .btn { margin-bottom: 0; }
-.muted { font-size: 14px; color: var(--ink3); }
+.muted { font-size: 16px; color: var(--ink3); }
 .card-md { padding: 18px 20px; background: var(--near); border: var(--bw) solid var(--hair); border-radius: var(--r-s); }
 .card-md.md { font-size: 16px; }
 .gate-note { font-size: 15px; color: var(--rev-d); }
@@ -687,7 +687,7 @@ input[type="range"]::-moz-range-thumb {
 
 /* What an answer was written with (temperature, system prompt). */
 .turn-settings {
-  font-family: var(--mo); font-size: 13px; color: var(--ink3);
+  font-size: 16px; color: var(--ink3);
   overflow-wrap: anywhere;
 }
 .field-saved { font-family: var(--mo); font-size: 13px; font-weight: 600; color: var(--held-d); }

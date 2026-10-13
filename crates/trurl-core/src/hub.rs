@@ -275,6 +275,12 @@ pub fn chat_kind(pipeline_tag: Option<&str>, id: &str) -> Option<bool> {
         "fill-mask",
         "translation",
     ];
+    // Some repositories carry the wrong task tag ("text-generation" on an
+    // embedding model): these words in the name win over the tag.
+    let short = id.rsplit('/').next().unwrap_or(id).to_ascii_lowercase();
+    if ["embed", "rerank"].iter().any(|w| short.contains(w)) {
+        return Some(false);
+    }
     if let Some(t) = pipeline_tag {
         if CHAT.contains(&t) {
             return Some(true);
@@ -461,6 +467,14 @@ mod tests {
             chat_kind(None, "bartowski/Llama-3.2-1B-Instruct-GGUF"),
             None
         );
+        // Tagged as chat on Hugging Face, but the name says otherwise.
+        for id in [
+            "DevQuasar/Qwen3-VL-Embedding-2B-GGUF",
+            "bartowski/granite-embedding-125m-english-GGUF",
+            "DevQuasar/Qwen3-Reranker-4B-GGUF",
+        ] {
+            assert_eq!(chat_kind(Some("text-generation"), id), Some(false), "{id}");
+        }
     }
 
     #[test]

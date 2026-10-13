@@ -276,7 +276,18 @@ async fn small_context_runs_out_of_room_with_the_course_message() {
     let e = t.error.as_ref().unwrap();
     assert_eq!(e.code, ErrorCode::ContextFull);
     assert_eq!(e.title, "Your message is too long for the context size.");
-    // Fills up while answering, later in the chat: the course's own words.
+    // The question above got no answer, so it takes no room: running out now is
+    // still "increase the context", not "start a new chat".
+    let t = h.ask("Count from 1 to 300, one number per line.").await;
+    assert_eq!(t.status, TurnStatus::Cut, "{t:?}");
+    assert_eq!(
+        t.error.as_ref().unwrap().hint,
+        "Increase the context size, then ask again."
+    );
+    // After an answer that stays in the chat: the course's own words.
+    h.app.new_chat();
+    let t = h.ask("Say hi in two words.").await;
+    assert_eq!(t.status, TurnStatus::Done, "{t:?}");
     let t = h.ask("Count from 1 to 300, one number per line.").await;
     assert_eq!(t.status, TurnStatus::Cut, "{t:?}");
     let e = t.error.as_ref().unwrap();

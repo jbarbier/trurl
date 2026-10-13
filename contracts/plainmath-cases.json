@@ -19,5 +19,10 @@
   ["Solve: $2x = 10$, so $x = 5$.", "Solve: 2x = 10, so x = 5."],
   ["So $ B $ has 3 pens and $ p + q $ is 5.", "So B has 3 pens and p + q is 5."],
   ["$ \\frac{1}{2} $ of the cake", "1/2 of the cake"],
-  ["It costs $ 5 and $ 10 later.", "It costs $ 5 and $ 10 later."]
+  ["It costs $ 5 and $ 10 later.", "It costs $ 5 and $ 10 later."],
+  ["The angle is $36.87^\\circ$.", "The angle is 36.87°."],
+  ["$\\begin{aligned} x &= 2 \\\\ y &= 3 \\end{aligned}$", "x = 2\ny = 3"],
+  ["$\\binom{5}{2} = 10$", "C(5, 2) = 10"],
+  ["$\\lfloor 3.7 \\rfloor = 3$", "⌊3.7⌋ = 3"],
+  ["$x \\in \\mathbb{R}$", "x ∈ R"]
 ]

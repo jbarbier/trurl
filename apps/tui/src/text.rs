@@ -221,6 +221,18 @@ fn symbol(name: &str) -> Option<&'static str> {
         "cap" => "∩",
         "forall" => "∀",
         "exists" => "∃",
+        "lfloor" => "⌊",
+        "rfloor" => "⌋",
+        "lceil" => "⌈",
+        "rceil" => "⌉",
+        "angle" => "∠",
+        "triangle" => "△",
+        "perp" => "⊥",
+        "parallel" => "∥",
+        "therefore" => "∴",
+        "notin" => "∉",
+        "subset" => "⊂",
+        "emptyset" => "∅",
         "quad" | "," | ";" | " " => " ",
         "qquad" => "  ",
         "!" => "",
@@ -249,6 +261,15 @@ fn convert(src: &str) -> String {
         "mathit",
         "left",
         "right",
+        "binom",
+        "mathbb",
+        "mathcal",
+        "vec",
+        "hat",
+        "bar",
+        "overline",
+        "begin",
+        "end",
     ];
     while i < b.len() {
         let c = b[i];
@@ -289,6 +310,16 @@ fn convert(src: &str) -> String {
                     };
                     out.push_str(&format!("{}/{}", p(&a), p(&d)));
                 }
+                "binom" => {
+                    let a = convert(&arg(&mut i));
+                    let d = convert(&arg(&mut i));
+                    out.push_str(&format!("C({a}, {d})"));
+                }
+                // \begin{aligned} … \end{aligned}: the lines inside are what matters.
+                "begin" | "end" => {
+                    let _ = arg(&mut i);
+                }
+                "\\" => out.push('\n'),
                 "sqrt" => {
                     let a = convert(&arg(&mut i));
                     out.push('√');
@@ -299,7 +330,8 @@ fn convert(src: &str) -> String {
                     });
                 }
                 "text" | "mbox" => out.push_str(&arg(&mut i)),
-                "boxed" | "textbf" | "mathrm" | "mathbf" | "operatorname" | "textit" | "mathit" => {
+                "boxed" | "textbf" | "mathrm" | "mathbf" | "mathbb" | "mathcal" | "vec" | "hat"
+                | "bar" | "overline" | "operatorname" | "textit" | "mathit" => {
                     let a = arg(&mut i);
                     out.push_str(&convert(&a));
                 }
@@ -313,13 +345,26 @@ fn convert(src: &str) -> String {
                 let (g, e) = group(&b, i);
                 i = e;
                 g
+            } else if b.get(i) == Some(&'\\') {
+                // ^\circ: the whole command, not just its backslash.
+                let n: String = b[i + 1..]
+                    .iter()
+                    .take_while(|c| c.is_ascii_alphabetic())
+                    .collect();
+                let n = if n.is_empty() {
+                    b.get(i + 1).map(|c| c.to_string()).unwrap_or_default()
+                } else {
+                    n
+                };
+                i += 1 + n.chars().count();
+                format!("\\{n}")
             } else {
                 let s = b.get(i).map(|c| c.to_string()).unwrap_or_default();
                 i += 1;
                 s
             };
             let a = convert(&a);
-            out.push_str(&if c == '^' { sup(&a) } else { a });
+            out.push_str(&if c == '^' && a != "°" { sup(&a) } else { a });
         } else if c == '{' || c == '}' || c == '&' {
             i += 1;
         } else {
@@ -327,13 +372,13 @@ fn convert(src: &str) -> String {
             i += 1;
         }
     }
-    // Tidy: no space just inside brackets, single spaces.
+    // Tidy: no space just inside brackets or around line breaks, single spaces.
     let mut t = String::new();
     for ch in out.chars() {
-        if ch == ' ' && (t.ends_with(' ') || t.ends_with(['(', '[', '{'])) {
+        if ch == ' ' && (t.ends_with([' ', '\n']) || t.ends_with(['(', '[', '{', '⌊', '⌈'])) {
             continue;
         }
-        if matches!(ch, ')' | ']' | '}') && t.ends_with(' ') {
+        if matches!(ch, ')' | ']' | '}' | '⌋' | '⌉' | '\n') && t.ends_with(' ') {
             t.pop();
         }
         t.push(ch);

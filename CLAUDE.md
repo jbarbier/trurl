@@ -36,7 +36,9 @@ a desktop app (Windows, Tauri) and a terminal app (Linux).
    with a title and a "what to do" line (`crates/trurl-core/src/errors.rs`). A raw
    stack trace or HTTP code on screen is a bug.
 6. **1366x768 is the design screen.** Every view must work there without scrolling the
-   page sideways, with body text at 16px or more.
+   page sideways. Every sentence a learner reads (answers, notes, hints, errors, the
+   settings under an answer) is 16px or more; only labels, badges, table headers and
+   technical names (file names, `Q4_K_M`) may be smaller, never under 12px.
 
 ## Layout
 

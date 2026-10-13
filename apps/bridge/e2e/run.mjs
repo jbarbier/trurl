@@ -157,6 +157,8 @@ if (SUITE === "full") {
         const live = lastTurn().locator(".think");
         if ((await live.locator(".think-toggle").getAttribute("aria-expanded")) !== "true") throw new Error("thinking is folded while it streams");
         if (!(await live.locator(".think-body").isVisible())) throw new Error("thinking text is hidden while it streams");
+        // The status says so too (not "Starting" for the whole think).
+        if (!/Thinking/.test(await pill())) throw new Error("the status pill says " + (await pill()) + " while the model thinks");
       }
       if (!attempt) await shot(page, "thinking");
       await waitPill("Ready", 600000);

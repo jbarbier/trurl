@@ -117,7 +117,7 @@
     FORBID_TAGS: ["img", "picture", "source", "video", "audio", "iframe", "style", "form", "input", "button", "svg", "math"],
     FORBID_ATTR: ["style", "id", "class"],
   };
-  const md = (text) => DOMPurify.sanitize(marked.parse(plainMath(text || ""), { gfm: true, async: false }), PURIFY);
+  const md = (text) => DOMPurify.sanitize(marked.parse(plainMath(text || ""), { gfm: true, breaks: true, async: false }), PURIFY);
 
   // ---------- State -------------------------------------------------------
 
@@ -427,6 +427,9 @@
   function applySettings() {
     const st = S.settings;
     if (!st) return;
+    for (const v of views.values()) {
+      if (v.end.querySelector("[data-bigger]")) v.end.replaceChildren(...ending(v.turn, v), ...copyButton(v));
+    }
     if (document.activeElement !== sys) {
       sys.value = st.system_prompt || "";
       $("sysClear").hidden = !sys.value;
@@ -494,7 +497,7 @@
   function turnSettings(t) {
     if (t.temperature == null) return null;
     const sp = (t.system_prompt || "").trim();
-    const short = sp.length > 70 ? sp.slice(0, 68) + "…" : sp;
+    const short = sp.length > 240 ? sp.slice(0, 238) + "…" : sp;
     const text = `Temperature ${Number(t.temperature).toFixed(1)} · ` + (sp ? `System prompt: “${short}”` : "No system prompt");
     return h("div", { class: "turn-settings", title: sp || null, text });
   }
@@ -584,6 +587,13 @@
     return [btn];
   }
 
+  // The next context size above both the one this turn ran in and the current one.
+  function nextContext(t) {
+    const choices = (S.settings && S.settings.context_choices) || [];
+    const now = Math.max(t.context || 0, (S.settings && S.settings.context_size) || 0);
+    return choices.find((c) => c > now);
+  }
+
   function ending(t, view) {
     if (t.status === "stopped") return [h("span", { class: "end-note", text: "Stopped" })];
     if (t.status === "cut" || t.status === "error") {
@@ -594,9 +604,7 @@
       const acts = [];
       if (cut) {
         // One click to the next context size, with the question back in the box.
-        const choices = (S.settings && S.settings.context_choices) || [];
-        const now = t.context || (S.settings && S.settings.context_size) || 0;
-        const next = choices.find((c) => c > Math.max(now, (S.settings && S.settings.context_size) || 0));
+        const next = nextContext(t);
         if (next)
           acts.push(
             h(
@@ -604,19 +612,25 @@
               {
                 class: "btn btn-primary btn-small",
                 type: "button",
-                onclick: () => {
-                  run("set_context", { value: next });
+                "data-bigger": "",
+                onclick: async () => {
+                  // Worked out again on click: the context may have changed since.
+                  const n = nextContext(t);
+                  if (!n || S.generating) return;
+                  await run("set_context", { value: n });
                   input.value = t.user;
                   input.dispatchEvent(new Event("input"));
-                  input.focus();
+                  send(); // waits for the model to load, then asks
                 },
               },
               `Use ${fmt.num(next)} tokens and ask again`
             )
           );
         // "New chat" helps only when earlier messages fill the context.
-        const first = view && turnsEl.querySelector(".turn") === view.el;
-        if (!first) acts.push(h("button", { class: "btn btn-secondary btn-small", type: "button", onclick: newChat }, "New chat"));
+        // The core says "Start a new chat" only when earlier answers fill the context.
+        if (/new chat/i.test(err.hint || "")) acts.push(h("button", { class: "btn btn-secondary btn-small", type: "button", onclick: newChat }, "New chat"));
+        if (!t.answer && t.reasoning)
+          acts.push(h("p", { class: "h think-tip", text: "Small thinking models sometimes think for a very long time: that is normal. To skip the thinking, start your message with /no_think." }));
       }
       let detail = null;
       if (err.detail) {
@@ -762,6 +776,7 @@
         title: "Start a new chat?",
         text: "The model is still answering. The answer so far will be lost.",
         ok: "Start a new chat",
+        keep: "Keep this answer",
         danger: true,
       });
       if (!ok) return;
@@ -798,10 +813,11 @@
     });
   });
 
-  function confirmBox({ title, text, ok, danger }) {
+  function confirmBox({ title, text, ok, keep = "Cancel", danger }) {
     const dlg = $("confirmDlg");
     $("confirmTitle").textContent = title;
     $("confirmText").textContent = text;
+    $("confirmCancel").textContent = keep;
     const okBtn = $("confirmOk");
     okBtn.textContent = ok;
     okBtn.className = "btn " + (danger ? "btn-primary btn-danger" : "btn-primary");
@@ -976,7 +992,7 @@
               d.status === "paused" && b("Resume", "download_resume", "r"),
               d.status === "failed" && b("Try again", "download_resume", "r"),
               d.status !== "verifying" && d.status !== "done" && h("button", { class: "btn btn-quiet btn-small", type: "button", "data-key": "c" + d.id, "aria-label": `Cancel ${d.dest_file}`, onclick: async () => {
-                    const ok = await confirmBox({ title: "Cancel this download?", text: `${d.dest_file}: what was downloaded so far will be deleted. To stop for now and go on later, press Pause instead.`, ok: "Cancel the download", danger: true });
+                    const ok = await confirmBox({ title: "Delete this download?", text: `${d.dest_file}: what was downloaded so far will be deleted. To stop for now and go on later, press Pause instead.`, ok: "Delete the download", keep: "Keep downloading", danger: true });
                     if (ok) run("download_cancel", { id: d.id });
                   } }, "Cancel"),
             ].filter(Boolean)
@@ -1176,7 +1192,7 @@
       d.gated && !(S.settings && S.settings.has_hf_token) && h("p", { class: "gate-note", text: "This model needs a free Hugging Face account. Ask your teacher to add an access token (Ctrl+Shift+S)." }),
       h("h4", { class: "sub-h", text: "Files" }),
       h("p", { class: "muted", text: "Each file is the same model at a different size. Smaller files are faster and use less memory." }),
-      h("p", { class: "muted quant-legend", text: "The version name says how much the model was squeezed: Q4_K_M keeps about 4 bits per number (small, good: the one to pick); Q8_0 keeps 8 (twice the size, a little more exact)." }),
+      h("p", { class: "muted quant-legend", text: "The version name says how much the model was squeezed: Q4_K_M keeps about 4 bits per number (small, good: the one to pick, listed first); Q8_0 keeps 8 (twice the size, a little more exact). Names starting with IQ or UD are other ways of squeezing: if unsure, take Q4_K_M." }),
       h("table", { class: "files" }, h("thead", null, h("tr", null, h("th", { text: "Version" }), h("th", { text: "Size" }), h("th", { text: "Fits this computer?" }), h("th", null, h("span", { class: "sr-only", text: "Action" })))), hubEls.files),
       h("h4", { class: "sub-h", text: "Model card" }),
     ]);
@@ -1198,8 +1214,9 @@
     const d = hub.details;
     if (!d || !hubEls.files) return;
     keepFocus(hubEls.files, () => {
+      const files = [...d.files.filter((f) => f.quant === "Q4_K_M" && !f.split), ...d.files.filter((f) => !(f.quant === "Q4_K_M" && !f.split))];
       hubEls.files.replaceChildren(
-        ...d.files.map((f) => {
+        ...files.map((f) => {
           const dest = basename(f.path);
           const local = S.models.some((m) => m.file === dest);
           const dl = S.downloads.find((x) => x.dest_file === dest);
@@ -1526,6 +1543,7 @@
       if (!v) return;
       const t = v.turn;
       const wasAnswering = !!t.answer;
+      const wasThinking = !!t.reasoning;
       if (ev.reasoning_from_answer) {
         t.reasoning += t.answer;
         t.answer = "";
@@ -1533,7 +1551,11 @@
       if (ev.reasoning) t.reasoning += ev.reasoning;
       if (ev.answer) t.answer += ev.answer;
       schedule(v);
-      if (!wasAnswering && t.answer) renderStatus();
+      // "Starting" -> "Thinking" -> "Answering": the status follows each first.
+      if ((!wasAnswering && t.answer) || (!wasThinking && t.reasoning)) {
+        renderStatus();
+        renderComposer();
+      }
     },
     turn_thought(ev) {
       const v = views.get(ev.id);

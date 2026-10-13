@@ -628,6 +628,20 @@ pub fn chat_lines(ui: &Ui, width: usize) -> Vec<Line<'static>> {
                         width,
                         Span::raw("  "),
                     ));
+                    if e.code == trurl_core::ErrorCode::ContextFull {
+                        out.push(Line::from(Span::styled(
+                            "  F5: a bigger context, and the same question back in the box.",
+                            Style::default().fg(ACCENT),
+                        )));
+                    }
+                    if t.answer.is_empty() && !t.reasoning.is_empty() {
+                        out.extend(wrap_plain(
+                            "Small thinking models sometimes think for a very long time: that is normal. To skip the thinking, start your message with /no_think.",
+                            width,
+                            Style::default().fg(DIM),
+                            Span::raw("  "),
+                        ));
+                    }
                 }
             }
             _ => {}

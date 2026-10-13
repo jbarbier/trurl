@@ -890,7 +890,13 @@ impl App {
             st.generating = false;
             // "New chat" during an answer removes the turn: the answer is over all the same,
             // and the front ends must still hear that nothing is generating any more.
-            let first = st.turns.first().is_some_and(|t| t.id == id);
+            // "First" for the context: no earlier turn goes back to the model (a
+            // question that got no answer costs no room), so a new chat cannot help.
+            let first = st
+                .turns
+                .iter()
+                .filter(|t| t.id != id)
+                .all(|t| !t.in_history());
             st.turns.iter_mut().find(|t| t.id == id).map(|t| {
                 match end {
                     StreamEnd::Done => t.status = TurnStatus::Done,
