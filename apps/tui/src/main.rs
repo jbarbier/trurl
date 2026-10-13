@@ -6,12 +6,12 @@
 //!
 //! Used on Linux, and on Windows 7/8.1 where the desktop app cannot run.
 
+#[cfg(test)]
+mod parity_tests;
 mod selfupdate;
 mod state;
 mod text;
 mod view;
-#[cfg(test)]
-mod parity_tests;
 
 use ratatui::crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event as TermEvent, KeyCode, KeyEvent,

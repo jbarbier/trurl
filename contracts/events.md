@@ -1,7 +1,9 @@
 # Core ↔ front end contract
 
-Version 1. Source of truth: `crates/trurl-core/src/events.rs` (events) and
-`apps/desktop/ui/api.js` (commands). Both front ends (desktop UI over Tauri or the
+Version 1. Source of truth: `crates/trurl-core/src/events.rs` (events),
+`crates/trurl-core/src/api.rs` (commands) and, for what only the desktop app has
+(`update_*` events, `update_check`, `update_install`, `open_models_folder`),
+`apps/desktop/src-tauri/src/main.rs`. Both front ends (desktop UI over Tauri or the
 dev bridge, terminal app in-process) use exactly this.
 
 ## Commands

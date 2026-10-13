@@ -745,7 +745,10 @@ fn downloads_lines(ui: &Ui, l: &mut Vec<Line<'static>>, selectable: bool) {
                 human_size(d.size),
                 human_size(d.rate)
             ),
-            DownloadStatus::Retrying => "Connection lost. Trying again…".into(),
+            DownloadStatus::Retrying => match &d.error {
+                Some(e) => format!("{} Trying again…", e.title),
+                None => "Connection lost. Trying again…".into(),
+            },
             DownloadStatus::Paused => format!("Paused at {}", human_size(d.done)),
             DownloadStatus::Verifying => "Checking the file…".into(),
             DownloadStatus::Failed => d

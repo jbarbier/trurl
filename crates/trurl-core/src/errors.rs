@@ -24,6 +24,11 @@ pub enum ErrorCode {
     HubFailed,
     HubGated,
     DownloadFailed,
+    /// The server answered, but not with the file (a filter page, a proxy that
+    /// mangles ranges). Retried a few times, then reported.
+    DownloadBlocked,
+    /// Writing the download to disk failed (not "disk full").
+    DownloadSave,
     DownloadCorrupt,
     DiskFull,
     ImportFailed,
@@ -176,6 +181,31 @@ impl UserError {
         )
     }
 
+    pub fn download_blocked() -> Self {
+        Self::new(
+            ErrorCode::DownloadBlocked,
+            "Hugging Face sent something that is not the model file.",
+            "A school or office network may block downloads. Try another connection, or download at home and import the file.",
+        )
+    }
+
+    pub fn download_save_failed() -> Self {
+        Self::new(
+            ErrorCode::DownloadSave,
+            "Trurl could not save the download.",
+            "Check that the disk or USB stick is still there and has room, then press Try again.",
+        )
+    }
+
+    /// The secure connection failed: on these laptops, most often a wrong clock.
+    pub fn hub_tls() -> Self {
+        Self::new(
+            ErrorCode::HubFailed,
+            "Trurl could not make a secure connection to Hugging Face.",
+            "Check that the computer's date and time are right. A school network may also block it.",
+        )
+    }
+
     pub fn download_corrupt(file: &str) -> Self {
         Self::new(
             ErrorCode::DownloadCorrupt,
@@ -267,6 +297,18 @@ impl UserError {
     }
 }
 
+/// An error and all its causes on one line, for the "Details" a teacher may read.
+pub fn chain(e: &(dyn std::error::Error + 'static)) -> String {
+    let mut s = e.to_string();
+    let mut cur = e.source();
+    while let Some(c) = cur {
+        s.push_str(": ");
+        s.push_str(&c.to_string());
+        cur = c.source();
+    }
+    s
+}
+
 /// ENOSPC on Unix (28), ERROR_DISK_FULL (112) and ERROR_HANDLE_DISK_FULL (39) on Windows.
 pub fn is_disk_full(e: &std::io::Error) -> bool {
     if e.kind() == std::io::ErrorKind::StorageFull {
@@ -304,6 +346,10 @@ mod tests {
             UserError::hub_gated("a/b"),
             UserError::download_failed(),
             UserError::download_corrupt("f.gguf"),
+            UserError::download_blocked(),
+            UserError::download_save_failed(),
+            UserError::hub_tls(),
+            UserError::installing_update(),
             UserError::disk_full(),
             UserError::import_failed(),
             UserError::not_gguf("f.txt"),

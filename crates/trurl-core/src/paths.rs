@@ -121,9 +121,6 @@ pub fn server_exe_name() -> &'static str {
     }
 }
 
-/// A file name that is safe on every OS: no separators, no `..`, no reserved
-/// Windows names, no control characters, ASCII only (llama.cpp and some Windows
-/// tools still mishandle non-ASCII paths). Keeps the `.gguf` extension.
 /// A bare `.gguf` file name: no folder, no `..`, no drive, nothing hidden.
 pub fn is_plain_model_name(file: &str) -> bool {
     let p = Path::new(file);
@@ -136,6 +133,9 @@ pub fn is_plain_model_name(file: &str) -> bool {
         )
 }
 
+/// A file name that is safe on every OS: no separators, no `..`, no reserved
+/// Windows names, no control characters, ASCII only (llama.cpp and some Windows
+/// tools still mishandle non-ASCII paths). Keeps the `.gguf` extension.
 pub fn safe_model_file_name(original: &str) -> Option<String> {
     let base = original.rsplit(['/', '\\']).next()?.trim();
     let stem = base

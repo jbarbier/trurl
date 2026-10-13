@@ -109,6 +109,9 @@ type OnDone = Arc<dyn Fn(String) + Send + Sync>;
 
 struct Entry {
     info: DownloadInfo,
+    /// What the job file on disk says (status, synced, paused, failed): it is
+    /// rewritten only when one of these changes, not on every progress tick.
+    saved: Option<(DownloadStatus, u64, bool, bool)>,
     cancel: Option<CancellationToken>,
     /// Held by the task that downloads this entry, so a quick Pause then Resume
     /// can never have two tasks writing the same file.
@@ -119,6 +122,7 @@ impl Entry {
     fn new(info: DownloadInfo) -> Self {
         Entry {
             info,
+            saved: None,
             cancel: None,
             run_lock: Arc::default(),
         }
@@ -207,9 +211,7 @@ impl Downloads {
                 Some("json") => {}
                 _ => continue,
             }
-            let Some(mut info) = std::fs::read_to_string(&p)
-                .ok()
-                .and_then(|t| serde_json::from_str::<DownloadInfo>(&t).ok())
+            let Some(mut info) = read_job(&p).or_else(|| read_job(&p.with_extension("json.tmp")))
             else {
                 continue;
             };
@@ -286,20 +288,25 @@ impl Downloads {
     }
 
     fn update(&self, id: &str, f: impl FnOnce(&mut DownloadInfo)) {
-        let snapshot = {
+        let to_save = {
             let mut map = self.inner.entries.lock().unwrap();
             let Some(e) = map.get_mut(id) else { return };
             f(&mut e.info);
-            e.info.clone()
-        };
-        if snapshot.status != DownloadStatus::Done {
-            // Write then rename: a power cut leaves the old job file or the new
-            // one, never half of one (which restore would have to skip).
-            let path = self.job_path(id);
-            let tmp = path.with_extension("json.tmp");
-            if std::fs::write(&tmp, serde_json::to_vec(&snapshot).unwrap_or_default()).is_ok() {
-                let _ = std::fs::rename(&tmp, &path);
+            let key = (
+                e.info.status,
+                e.info.synced,
+                e.info.user_paused,
+                e.info.error.is_some(),
+            );
+            if e.info.status == DownloadStatus::Done || e.saved == Some(key) {
+                None
+            } else {
+                e.saved = Some(key);
+                Some(e.info.clone())
             }
+        };
+        if let Some(info) = to_save {
+            write_job(&self.job_path(id), &info);
         }
     }
 
@@ -372,10 +379,7 @@ impl Downloads {
             self.finish_with_error(id, UserError::disk_full());
             return Err(UserError::disk_full());
         }
-        let _ = std::fs::write(
-            self.job_path(id),
-            serde_json::to_vec(&info).unwrap_or_default(),
-        );
+        write_job(&self.job_path(id), &info);
         self.emit();
         let me = self.clone();
         let id = id.to_string();
@@ -473,6 +477,7 @@ impl Downloads {
             return;
         }
         let mut attempt = 0usize;
+        let mut blocked = 0usize;
         loop {
             let before = std::fs::metadata(self.part_path(&id))
                 .map(|m| m.len())
@@ -492,23 +497,34 @@ impl Downloads {
                 Ok(()) => break,
                 // A dropped connection is the normal case here: keep trying, slower
                 // and slower, for as long as Trurl is open. Pause and Cancel still work.
+                // "Not the file" (a filter page, a broken proxy): a few tries, then say so.
                 Err(e)
-                    if e.code == ErrorCode::DownloadFailed
+                    if (e.code == ErrorCode::DownloadFailed
+                        || (e.code == ErrorCode::DownloadBlocked
+                            && blocked < self.inner.retry_delays.len()))
                         && !self.inner.retry_delays.is_empty() =>
                 {
                     let delays = &self.inner.retry_delays;
                     let delay = delays[attempt.min(delays.len() - 1)];
                     attempt += 1;
+                    let why = (e.code == ErrorCode::DownloadBlocked).then(|| {
+                        blocked += 1;
+                        e.clone()
+                    });
                     self.update(&id, |i| {
                         i.status = DownloadStatus::Retrying;
                         i.rate = 0;
+                        i.error = why;
                     });
                     self.emit();
                     tokio::select! {
                         _ = tokio::time::sleep(delay) => {}
                         _ = cancel.cancelled() => return,
                     }
-                    self.update(&id, |i| i.status = DownloadStatus::Running);
+                    self.update(&id, |i| {
+                        i.status = DownloadStatus::Running;
+                        i.error = None;
+                    });
                     self.emit();
                 }
                 Err(e) => {
@@ -569,9 +585,14 @@ impl Downloads {
         let part = self.part_path(id);
         let mut have = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
         if info.size > 0 && have > info.size {
-            std::fs::write(&part, b"")
-                .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
-            have = 0;
+            // Longer than the file can be: the tail is junk, the start may be fine
+            // (the check at the end decides).
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(&part)
+                .and_then(|f| f.set_len(info.size))
+                .map_err(save_error)?;
+            have = info.size;
         }
         if info.size > 0 && have == info.size {
             return Ok(());
@@ -608,7 +629,7 @@ impl Downloads {
                     Some(s) if s <= have => s,
                     // Later than asked, or unreadable: appending would leave a hole.
                     _ => {
-                        return Err(UserError::download_failed()
+                        return Err(UserError::download_blocked()
                             .with_detail(format!("unexpected Content-Range {cr:?}")));
                     }
                 }
@@ -617,8 +638,14 @@ impl Downloads {
             // only if it has exactly the expected size, then write it over the
             // part from byte 0: matching bytes stay as they are.
             200 => {
-                if info.size > 0 && length != Some(info.size) {
-                    return Err(UserError::download_failed().with_detail(format!(
+                let wrong = if info.size > 0 {
+                    length != Some(info.size)
+                } else {
+                    // Size unknown: at least never shorter than what we have.
+                    have > 0 && length.is_none_or(|l| l < have)
+                };
+                if wrong {
+                    return Err(UserError::download_blocked().with_detail(format!(
                         "HTTP 200 with {length:?} bytes, expected {}",
                         info.size
                     )));
@@ -631,7 +658,7 @@ impl Downloads {
                 if info.size == 0 || have >= info.size {
                     return Ok(());
                 }
-                return Err(UserError::download_failed().with_detail("416 on resume"));
+                return Err(UserError::download_blocked().with_detail("416 on resume"));
             }
             401 | 403 => {
                 return Err(UserError::hub_gated(&info.repo).with_detail(format!("HTTP {status}")));
@@ -644,13 +671,14 @@ impl Downloads {
             .write(true)
             .truncate(false)
             .open(&part)
-            .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
-        f.seek(SeekFrom::Start(start))
-            .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
+            .map_err(save_error)?;
+        f.seek(SeekFrom::Start(start)).map_err(save_error)?;
         let mut done = start;
         // Bytes known to be on the disk (synced): what a restart after a power cut
         // may trust. Everything past it is checked again or downloaded again.
-        let mut synced = start.min(info.synced);
+        // Writing again from an earlier point rewrites the same bytes (the commit is
+        // pinned): what was synced before stays synced. It only ever grows.
+        let mut synced = info.synced.min(have);
         let mut last_sync = Instant::now();
         self.update(id, |i| {
             i.done = done.max(have);
@@ -664,24 +692,26 @@ impl Downloads {
             let next = tokio::select! {
                 n = stream.next() => n,
                 _ = cancel.cancelled() => {
-                    let _ = f.sync_data();
-                    self.update(id, |i| i.synced = if done >= have { done } else { synced });
+                    if f.sync_data().is_ok() {
+                        synced = synced.max(done);
+                    }
+                    self.update(id, |i| i.synced = synced);
                     return Ok(());
                 }
             };
             match next {
                 Some(Ok(chunk)) => {
-                    f.write_all(&chunk)
-                        .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
+                    f.write_all(&chunk).map_err(save_error)?;
                     done += chunk.len() as u64;
+                    if info.size > 0 && done > info.size {
+                        let _ = f.sync_data();
+                        return Err(UserError::download_blocked()
+                            .with_detail(format!("more than {} bytes", info.size)));
+                    }
                     window_bytes += chunk.len() as u64;
                     if last_sync.elapsed() >= Duration::from_secs(5) {
-                        f.sync_data().map_err(|e| {
-                            UserError::from_io_write(&e, UserError::download_failed())
-                        })?;
-                        // Overwriting from an earlier point leaves the old bytes after
-                        // it in place: they count only once they are proven again.
-                        synced = if done >= have { done } else { synced.min(done) };
+                        f.sync_data().map_err(save_error)?;
+                        synced = synced.max(done);
                         last_sync = Instant::now();
                         self.update(id, |i| i.synced = synced);
                     }
@@ -701,10 +731,12 @@ impl Downloads {
                     }
                 }
                 Some(Err(e)) => {
-                    let _ = f.sync_data();
+                    if f.sync_data().is_ok() {
+                        synced = synced.max(done);
+                    }
                     self.update(id, |i| {
                         i.done = done.max(have);
-                        i.synced = if done >= have { done } else { synced };
+                        i.synced = synced;
                     });
                     return Err(UserError::download_failed().with_detail(e.to_string()));
                 }
@@ -713,15 +745,15 @@ impl Downloads {
         }
         if done < have && (info.size == 0 || done >= info.size) {
             // A whole file sent over a longer stale part: drop the stale tail.
-            f.set_len(done)
-                .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
+            f.set_len(done).map_err(save_error)?;
         }
-        f.sync_all()
-            .map_err(|e| UserError::from_io_write(&e, UserError::download_failed()))?;
-        let have_now = done.max(have);
+        f.sync_all().map_err(save_error)?;
+        let synced = synced.max(done);
         self.update(id, |i| {
-            i.done = if done >= have { done } else { have_now };
-            i.synced = if done >= have { done } else { synced };
+            i.done = done
+                .max(have)
+                .min(if i.size > 0 { i.size } else { u64::MAX });
+            i.synced = synced;
             if i.size == 0 {
                 i.size = done;
             }
@@ -732,6 +764,36 @@ impl Downloads {
         }
         Ok(())
     }
+}
+
+fn save_error(e: std::io::Error) -> UserError {
+    UserError::from_io_write(&e, UserError::download_save_failed())
+}
+
+/// Write the job file so that a power cut leaves the old one or the new one,
+/// never a half-written or empty one: temporary file, synced, then renamed.
+fn write_job(path: &Path, info: &DownloadInfo) {
+    let tmp = path.with_extension("json.tmp");
+    let ok = std::fs::File::create(&tmp)
+        .and_then(|mut f| {
+            f.write_all(&serde_json::to_vec(info).unwrap_or_default())?;
+            f.sync_all()
+        })
+        .is_ok();
+    if ok {
+        let _ = std::fs::rename(&tmp, path);
+    }
+}
+
+/// A job file from disk. Files from before `synced` existed trust the part file.
+fn read_job(path: &Path) -> Option<DownloadInfo> {
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    let had_synced = v.get("synced").is_some();
+    let mut info: DownloadInfo = serde_json::from_value(v).ok()?;
+    if !had_synced {
+        info.synced = u64::MAX;
+    }
+    Some(info)
 }
 
 /// `bytes 100-199/200` -> Some(100)

@@ -132,7 +132,8 @@ pub fn exit_error(kind: &ExitKind, model_name: &str, log_tail: &str) -> UserErro
 pub struct LogRing(Arc<Mutex<VecDeque<String>>>, Option<Arc<Mutex<LogFile>>>);
 
 /// The server's output on disk, for a teacher to read or send when a model
-/// fails: `logs/llama-server.log` for this run, `.previous.log` for the one before.
+/// fails: `logs/llama-server.log` for this run of Trurl (every model loaded,
+/// one after the other), `.previous.log` for the run before.
 pub struct LogFile {
     file: std::fs::File,
     written: u64,
@@ -142,15 +143,27 @@ pub struct LogFile {
 const LOG_FILE_MAX: u64 = 10 * 1024 * 1024;
 
 impl LogFile {
-    pub fn create(path: &Path) -> Option<Self> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).ok()?;
-        }
+    /// At Trurl's start: this run's log begins empty, the last run's is kept.
+    pub fn rotate(path: &Path) {
         if path.exists() {
             let _ = std::fs::rename(path, path.with_extension("previous.log"));
         }
-        let file = std::fs::File::create(path).ok()?;
-        Some(LogFile { file, written: 0 })
+    }
+
+    /// For one model load: appended to this run's log, under a heading.
+    pub fn create(path: &Path, heading: &str) -> Option<Self> {
+        use std::io::Write;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).ok()?;
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .ok()?;
+        let written = file.metadata().map(|m| m.len()).unwrap_or(0);
+        let _ = writeln!(file, "\n===== {heading}");
+        Some(LogFile { file, written })
     }
 }
 
@@ -271,10 +284,14 @@ impl Server {
                 return Err(UserError::server_start().with_detail(e.to_string()));
             }
         };
+        let heading = format!(
+            "{} ({:?}, context {})",
+            cfg.model_file, cfg.variant, cfg.context
+        );
         let log = LogRing(
             Arc::default(),
             log_file
-                .and_then(LogFile::create)
+                .and_then(|p| LogFile::create(p, &heading))
                 .map(|f| Arc::new(Mutex::new(f))),
         );
         for stream in [
@@ -566,26 +583,29 @@ mod tests {
     }
 
     #[test]
-    fn the_server_log_goes_to_a_file_and_keeps_the_previous_run() {
+    fn the_server_log_keeps_every_load_of_this_run_and_the_previous_run() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("logs").join("llama-server.log");
-        let first = LogRing(
-            Arc::default(),
-            LogFile::create(&path).map(|f| Arc::new(Mutex::new(f))),
+        let ring = |h: &str| {
+            LogRing(
+                Arc::default(),
+                LogFile::create(&path, h).map(|f| Arc::new(Mutex::new(f))),
+            )
+        };
+        // Run 1: one model.
+        LogFile::rotate(&path);
+        ring("a.gguf").push("crash in a".into());
+        // Run 2: two models; the crash from run 1 is still there, as the previous run.
+        LogFile::rotate(&path);
+        ring("b.gguf").push("b line".into());
+        ring("c.gguf").push("c line".into());
+        let now = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            now.contains("===== b.gguf\nb line\n") && now.contains("===== c.gguf\nc line\n"),
+            "{now}"
         );
-        first.push("run 1".into());
-        drop(first);
-        let second = LogRing(
-            Arc::default(),
-            LogFile::create(&path).map(|f| Arc::new(Mutex::new(f))),
-        );
-        second.push("run 2".into());
-        drop(second);
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "run 2\n");
-        assert_eq!(
-            std::fs::read_to_string(path.with_extension("previous.log")).unwrap(),
-            "run 1\n"
-        );
+        let before = std::fs::read_to_string(path.with_extension("previous.log")).unwrap();
+        assert!(before.contains("crash in a"), "{before}");
     }
 
     #[test]

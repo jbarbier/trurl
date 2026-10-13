@@ -60,7 +60,10 @@ is in [GitHub Actions](https://github.com/jbarbier/trurl/actions/workflows/ci.ym
 open the latest run and download `windows-installer-and-screenshots`.
 
 Windows may say "Windows protected your PC" the first time: click **More info**,
-then **Run anyway**. The installer is not code-signed yet; updates are signed.
+then **Run anyway**. The installer is not code-signed yet; updates are signed. On a
+Windows 11 computer with **Smart App Control** on, an unsigned installer is blocked
+outright; [docs/USB-BUNDLE.md](docs/USB-BUNDLE.md#on-the-learners-computer) explains
+the choice.
 
 ![Trurl on Windows, with the network blocked: it loaded Gemma 3 1B and answers](docs/img/windows.png)
 
@@ -107,7 +110,8 @@ On the left:
 | Temperature | 0.0 to 2.0. Low: focused and repeatable (0 gives the same answer every time). High: more varied. | 0.7 |
 | Context size | How many tokens of conversation the model can see: 256 to 8,192. Changing it reloads the model. | 2,048 |
 
-Each control shows **Reset** when it is not at its default. When a conversation no
+Temperature and context size show **Reset** when they are not at their default;
+the system prompt has **Clear**. When a conversation no
 longer fits in the context, Trurl says: "The conversation ran out of room. Start a
 new chat or increase the context size."
 
@@ -212,11 +216,11 @@ it. Method and raw numbers: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 <!-- benchmarks:start -->
 | | App on disk | Load time | First word | Speed | RAM, idle | RAM, answering | CPU, idle |
 |---|---|---|---|---|---|---|---|
-| Trurl | **54 MB** | **1.7 s** | 0.93 s | **8.1 (3.7 to 10.3)** | 980 MB | 980 MB | **0.0%** |
-| Ollama | 2,253 MB | 7.9 s | 0.85 s | **8.8 (6.2 to 11.1)** | 954 MB | 954 MB | **0.0%** |
-| llamafile | 368 MB | 2.6 s | **0.8 s** | **5.7 (4.6 to 7.3)** | **936 MB** | **936 MB** | **0.0%** |
+| Trurl | **54 MB** | **1.9 s** | 1.1 s | **8.3 tokens/s (7.4 to 8.9)** | 980 MB | 980 MB | **0.0%** |
+| Ollama | 2,253 MB | 9.0 s | 0.79 s | **9.7 tokens/s (8.5 to 10.6)** | 951 MB | 953 MB | **0.0%** |
+| llamafile | 368 MB | 2.5 s | **0.77 s** | 6.3 tokens/s (5.9 to 6.5) | **935 MB** | **936 MB** | **0.0%** |
 
-DO-Premium-AMD, 2 threads, 7.8 GB RAM, no GPU. Model: `gemma-3-1b-it-Q4_K_M.gguf` for every app, context 2,048, temperature 0, answers of up to 128 tokens, median of 3 prompts x 5 rounds (the apps take turns each round), speed range in brackets. Measured 2026-10-13 by `scripts/benchmark.py`.
+A small cloud computer (2 AMD EPYC cores with AVX2), 2 threads, 7.8 GB RAM, no GPU. Model: `gemma-3-1b-it-Q4_K_M.gguf` for every app, context 2,048, temperature 0, answers of up to 128 tokens, median of 3 prompts x 5 rounds (the apps take turns each round). Speed in brackets: the middle half of the answers. Measured 2026-10-13 by `scripts/benchmark.py`.
 <!-- benchmarks:end -->
 
 ## For teachers

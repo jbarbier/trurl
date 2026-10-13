@@ -141,7 +141,7 @@ def main() -> int:
     a = ap.parse_args()
 
     sde = fetch_sde(Path(a.cache).expanduser())
-    root = Path(a.root)
+    root = Path(a.root).expanduser()
     logs = ROOT / "target" / "sde"
     logs.mkdir(parents=True, exist_ok=True)
     bad = 0
@@ -152,7 +152,7 @@ def main() -> int:
             bad += 1
             continue
         log = logs / f"{v}.log"
-        ok, msg = run(sde, CHIPS[v], exe, Path(a.model), log, a.budget)
+        ok, msg = run(sde, CHIPS[v], exe, Path(a.model).expanduser(), log, a.budget)
         print(f"{'ok  ' if ok else 'FAIL'} {v} on {CHIPS[v][1:]}: {msg}", flush=True)
         if not ok:
             bad += 1

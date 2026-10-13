@@ -43,14 +43,120 @@ pub async fn json_limited<T: serde::de::DeserializeOwned>(
     serde_json::from_slice(&bytes).map_err(|e| e.to_string())
 }
 
+/// Why a request failed, in the terms a learner can act on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetFailure {
+    /// No route, no name lookup, refused: the computer is not online.
+    Offline,
+    /// It reached something, but the secure connection failed: on these
+    /// laptops most often a wrong clock (dead CMOS battery), or a network that
+    /// intercepts HTTPS. "Connect to the internet" would be the wrong advice.
+    Tls,
+    /// Anything else (a proxy that wants a login, a server error, a timeout).
+    Other,
+}
+
+pub fn classify(e: &(dyn std::error::Error + 'static)) -> NetFailure {
+    use std::io::ErrorKind as K;
+    let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(e);
+    let mut offline = false;
+    while let Some(err) = cur {
+        let text = err.to_string().to_ascii_lowercase();
+        if [
+            "certificate",
+            "tls",
+            "ssl",
+            "handshake",
+            "schannel",
+            "unknownissuer",
+            "badsignature",
+        ]
+        .iter()
+        .any(|w| text.contains(w))
+        {
+            return NetFailure::Tls;
+        }
+        if let Some(io) = err.downcast_ref::<std::io::Error>()
+            && matches!(
+                io.kind(),
+                K::ConnectionRefused
+                    | K::NetworkUnreachable
+                    | K::HostUnreachable
+                    | K::NetworkDown
+                    | K::AddrNotAvailable
+            )
+        {
+            offline = true;
+        }
+        if text.contains("dns error")
+            || text.contains("failed to lookup address")
+            || text.contains("no such host")
+            || text.contains("name or service not known")
+            || text.contains("temporary failure in name resolution")
+        {
+            offline = true;
+        }
+        cur = err.source();
+    }
+    if offline {
+        NetFailure::Offline
+    } else {
+        NetFailure::Other
+    }
+}
+
 /// True when the request never reached a server: no network, no DNS, refused.
 /// Then the learner is told to connect, not that the site failed.
 pub fn is_offline(e: &reqwest::Error) -> bool {
-    e.is_connect() || (e.is_request() && !e.is_timeout() && !e.is_status())
+    e.is_connect() && classify(e) == NetFailure::Offline
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[derive(Debug)]
+    struct Wrap(&'static str, Option<Box<dyn std::error::Error + 'static>>);
+    impl std::fmt::Display for Wrap {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.0)
+        }
+    }
+    impl std::error::Error for Wrap {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            self.1.as_deref()
+        }
+    }
+
+    #[test]
+    fn a_wrong_clock_is_not_told_to_connect_to_the_internet() {
+        let tls = Wrap(
+            "error sending request",
+            Some(Box::new(Wrap("invalid peer certificate: Expired", None))),
+        );
+        assert_eq!(classify(&tls), NetFailure::Tls);
+        let refused = Wrap(
+            "error sending request",
+            Some(Box::new(std::io::Error::from(
+                std::io::ErrorKind::ConnectionRefused,
+            ))),
+        );
+        assert_eq!(classify(&refused), NetFailure::Offline);
+        let dns = Wrap(
+            "client error (Connect)",
+            Some(Box::new(Wrap(
+                "dns error: failed to lookup address information",
+                None,
+            ))),
+        );
+        assert_eq!(classify(&dns), NetFailure::Offline);
+        let proxy = Wrap(
+            "unsuccessful tunnel (407 Proxy Authentication Required)",
+            None,
+        );
+        assert_eq!(classify(&proxy), NetFailure::Other);
+    }
+
     #[tokio::test]
     async fn a_refused_connection_counts_as_offline() {
         // Port 9 on localhost: nothing listens there.

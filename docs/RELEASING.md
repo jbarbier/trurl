@@ -71,9 +71,13 @@ exists once a release is **published**, not while it is a draft.
 
 ## If something goes wrong
 
-- **The Release workflow failed.** Fix the cause on `main`, delete the draft release if
-  one was created (keep the tag), then re-run the failed workflow from the Actions
-  tab. Or delete the tag and tag the fixed commit.
+- **The Release workflow failed.**
+  - **Nothing to fix in the code** (a network hiccup, a runner problem): delete the
+    draft release if one was created, then re-run the failed workflow from the
+    Actions tab. It builds the same tagged commit.
+  - **The code needed a fix:** a re-run would build the old, tagged commit again.
+    Delete the draft release and the tag (`git push --delete origin vX.Y.Z` and
+    `git tag -d vX.Y.Z`), merge the fix to `main`, then tag the fixed commit.
 - **A bad release was published.** Publish a fixed one with a higher version. There is
   no rollback: Trurl only moves to newer versions.
 - **The manifest is missing or broken.** The apps say nothing and keep working.

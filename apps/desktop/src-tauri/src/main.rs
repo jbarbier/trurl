@@ -128,7 +128,7 @@ async fn install_update(app: AppHandle, d: Arc<Desktop>) -> Result<(), UserError
                 let stalled = async {
                     loop {
                         tokio::time::sleep(Duration::from_secs(5)).await;
-                        let quiet = started.elapsed().as_secs() - last_byte.load(std::sync::atomic::Ordering::Relaxed);
+                        let quiet = started.elapsed().as_secs().saturating_sub(last_byte.load(std::sync::atomic::Ordering::Relaxed));
                         if quiet >= UPDATE_STALL.as_secs() {
                             return;
                         }

@@ -76,7 +76,10 @@ fn thinking_streams_open_then_says_how_long_it_took() {
     ui.turns = vec![t];
     let s = flat(&screen(&ui, 100, 30));
     assert!(s.contains("Thought for 12s"), "{s}");
-    assert!(!s.contains("light scattering"), "closed once the answer started: {s}");
+    assert!(
+        !s.contains("light scattering"),
+        "closed once the answer started: {s}"
+    );
     assert!(s.contains("Rayleigh scattering"));
 }
 
@@ -107,7 +110,10 @@ fn running_out_of_room_says_so_in_plain_words() {
     let s = flat(&screen(&ui, 100, 30));
     assert!(s.contains("Ran out of room while thinking"), "{s}");
     assert!(s.contains("The conversation ran out of room."), "{s}");
-    assert!(s.contains("Start a new chat or increase the context size."), "{s}");
+    assert!(
+        s.contains("Start a new chat or increase the context size."),
+        "{s}"
+    );
 }
 
 #[test]
@@ -130,7 +136,8 @@ fn the_update_offer_shows_the_version_then_the_full_notes() {
     ready(&mut ui);
     let info = UpdateInfo {
         version: "0.2.0".into(),
-        notes: "Faster model loading.\nA Copy button under each answer.\nFixes for old CPUs.".into(),
+        notes: "Faster model loading.\nA Copy button under each answer.\nFixes for old CPUs."
+            .into(),
         date: None,
         url: String::new(),
         signature: String::new(),
@@ -144,10 +151,20 @@ fn the_update_offer_shows_the_version_then_the_full_notes() {
         notes: info.notes,
     });
     let s = flat(&screen(&ui, 120, 30));
-    for line in ["Faster model loading.", "A Copy button under each answer.", "Fixes for old CPUs."] {
-        assert!(s.contains(line), "all the notes, not just the first line: {s}");
+    for line in [
+        "Faster model loading.",
+        "A Copy button under each answer.",
+        "Fixes for old CPUs.",
+    ] {
+        assert!(
+            s.contains(line),
+            "all the notes, not just the first line: {s}"
+        );
     }
-    assert!(s.contains("Enter: update now") && s.contains("F8: later"), "{s}");
+    assert!(
+        s.contains("Enter: update now") && s.contains("F8: later"),
+        "{s}"
+    );
     assert!(s.contains("Your models and settings are kept."), "{s}");
 }
 
@@ -158,7 +175,10 @@ fn offline_hugging_face_says_what_to_do_and_nothing_else_breaks() {
     ui.screen = Screen::Hub;
     ui.hub_view = HubView::Offline;
     let s = flat(&screen(&ui, 100, 30));
-    assert!(s.contains("Connect to the internet to browse Hugging Face"), "{s}");
+    assert!(
+        s.contains("Connect to the internet to browse Hugging Face"),
+        "{s}"
+    );
 }
 
 #[test]
@@ -186,7 +206,13 @@ fn models_show_size_and_how_well_they_fit_in_memory() {
         model("c.gguf", "Big model", 7_000_000_000, RamFit::Red),
     ];
     let s = flat(&screen(&ui, 120, 30));
-    for want in ["Gemma 3 1B", "Fits easily", "Tight fit", "Too big", "806 MB"] {
+    for want in [
+        "Gemma 3 1B",
+        "Fits easily",
+        "Tight fit",
+        "Too big",
+        "806 MB",
+    ] {
         assert!(s.contains(want), "missing {want:?}: {s}");
     }
 }

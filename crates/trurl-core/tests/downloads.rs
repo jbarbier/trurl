@@ -32,6 +32,10 @@ enum Mode {
     /// A school web filter: the first request drops at 700 000 bytes, the next
     /// N requests get a small HTML page with status 200, then the real file.
     FilterPage(usize),
+    /// A proxy that ignores Range: the first request drops at 800 000 bytes,
+    /// the second sends the whole file again (200) and drops at 300 000, then
+    /// the whole file again.
+    IgnoreRangeAndDrop,
 }
 
 struct Srv {
@@ -63,7 +67,9 @@ async fn serve(State(s): State<Arc<Srv>>, headers: HeaderMap) -> Response {
         return Response::builder()
             .status(200)
             .header(header::CONTENT_TYPE, "text/html")
-            .body(Body::from("<html><body>This site is blocked by your school.</body></html>"))
+            .body(Body::from(
+                "<html><body>This site is blocked by your school.</body></html>",
+            ))
             .unwrap();
     }
     let total = s.data.len();
@@ -81,7 +87,7 @@ async fn serve(State(s): State<Arc<Srv>>, headers: HeaderMap) -> Response {
     } else {
         StatusCode::OK
     };
-    if s.mode == Mode::IgnoreRange {
+    if s.mode == Mode::IgnoreRange || (s.mode == Mode::IgnoreRangeAndDrop && n >= 1) {
         start = 0;
         status = StatusCode::OK;
     }
@@ -106,6 +112,11 @@ async fn serve(State(s): State<Arc<Srv>>, headers: HeaderMap) -> Response {
         Mode::DropAfter(cut, times) => Some((cut, times)),
         Mode::WrongRange | Mode::FilterPage(_) => Some((700_000, 1)),
         _ => None,
+    };
+    let drop_rule = match (s.mode, n) {
+        (Mode::IgnoreRangeAndDrop, 0) => Some((800_000, 1)),
+        (Mode::IgnoreRangeAndDrop, 1) => Some((300_000, 2)),
+        _ => drop_rule,
     };
     if let Some((cut, times)) = drop_rule
         && n < times
@@ -494,9 +505,14 @@ async fn a_filter_page_never_erases_the_part_already_downloaded() {
     let name = wait_done(&s).await.unwrap();
     assert_installed(&s, &name);
     let ranges = s.srv.ranges.lock().unwrap().clone();
-    assert!(ranges.len() >= 5, "drop, 3 filter pages, resume: {ranges:?}");
     assert!(
-        ranges[1..].iter().all(|r| r.as_deref() == Some("bytes=700000-")),
+        ranges.len() >= 5,
+        "drop, 3 filter pages, resume: {ranges:?}"
+    );
+    assert!(
+        ranges[1..]
+            .iter()
+            .all(|r| r.as_deref() == Some("bytes=700000-")),
         "every retry resumed from the kept bytes: {ranges:?} ({id})"
     );
 }
@@ -532,7 +548,10 @@ async fn after_a_power_cut_only_synced_bytes_are_kept() {
     let synced = part_len(&s, &id);
     // The power cut: garbage after the last sync, and the job still says `synced`.
     let part = s.dl_dir.path().join(format!("{id}.part"));
-    let mut f = std::fs::OpenOptions::new().append(true).open(&part).unwrap();
+    let mut f = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&part)
+        .unwrap();
     std::io::Write::write_all(&mut f, &[0u8; 300_000]).unwrap();
     drop(f);
     let done: Arc<Mutex<Vec<String>>> = Arc::default();
@@ -555,7 +574,10 @@ async fn after_a_power_cut_only_synced_bytes_are_kept() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     let name = done.lock().unwrap().first().cloned().expect("finished");
-    assert_eq!(std::fs::read(s.models.path().join(name)).unwrap(), s.srv.data);
+    assert_eq!(
+        std::fs::read(s.models.path().join(name)).unwrap(),
+        s.srv.data
+    );
 }
 
 /// A part file whose job is gone (or was never written) can never resume: it is
@@ -604,4 +626,81 @@ async fn an_edited_job_file_cannot_escape_the_models_folder() {
         Arc::new(|_| {}),
     );
     assert_eq!(again.list()[0].dest_file, "tiny-Q4_K_M.gguf");
+}
+
+/// A proxy that ignores Range sends the whole file again; the learner closes
+/// Trurl (or the power goes) while it is rewriting the first bytes. The bytes
+/// synced before must still be there at the next start.
+#[tokio::test]
+async fn a_crash_while_a_proxy_resends_the_whole_file_keeps_the_synced_bytes() {
+    let s = setup(Mode::IgnoreRangeAndDrop).await;
+    let id = s.downloads.start(s.req.clone()).unwrap();
+    let job = s.dl_dir.path().join(format!("{id}.json"));
+    // What a restart after a crash would trust: `synced` in the job file on disk.
+    // Watch it from the first drop (800 000 synced) until the download is done:
+    // a resend from byte 0 must never make it go back.
+    let mut lowest_after_drop: Option<u64> = None;
+    for _ in 0..3000 {
+        if !s.done.lock().unwrap().is_empty() {
+            break;
+        }
+        if s.srv.requests.load(Ordering::SeqCst) >= 2
+            && let Ok(bytes) = std::fs::read(&job)
+            && let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes)
+            && let Some(n) = v["synced"].as_u64()
+        {
+            lowest_after_drop = Some(lowest_after_drop.map_or(n, |m| m.min(n)));
+        }
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+    let name = wait_done(&s).await.unwrap();
+    assert_installed(&s, &name);
+    let lowest = lowest_after_drop.expect("saw the job file during the resend");
+    assert!(
+        lowest >= 800_000,
+        "a crash during the resend would have kept only {lowest} bytes"
+    );
+}
+
+/// A filter page that never goes away: a few tries, then a plain message that
+/// says what is going on. The part already downloaded is kept for later.
+#[tokio::test]
+async fn a_filter_page_that_never_goes_away_ends_with_a_plain_message() {
+    let s = setup(Mode::FilterPage(1_000)).await;
+    let id = s.downloads.start(s.req.clone()).unwrap();
+    let fail = wait_done(&s).await.unwrap_err();
+    let e = fail.error.clone().unwrap();
+    assert_eq!(e.code, trurl_core::ErrorCode::DownloadBlocked, "{e:?}");
+    assert!(e.title.contains("not the model file"), "{}", e.title);
+    assert!(part_len(&s, &id) >= 700_000, "the part is kept");
+}
+
+/// A job file written before `synced` existed must not be cut to zero.
+#[tokio::test]
+async fn an_old_job_file_without_synced_keeps_its_bytes() {
+    let s = setup(Mode::DropAfter(500_000, 1)).await;
+    let id = s.downloads.start(s.req.clone()).unwrap();
+    for _ in 0..300 {
+        if part_len(&s, &id) >= 500_000 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    s.downloads.pause_all();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let job = s.dl_dir.path().join(format!("{id}.json"));
+    let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&job).unwrap()).unwrap();
+    v.as_object_mut().unwrap().remove("synced");
+    std::fs::write(&job, serde_json::to_vec(&v).unwrap()).unwrap();
+    let have = part_len(&s, &id);
+    let again = Downloads::new(
+        s.dl_dir.path().into(),
+        s.models.path().into(),
+        "http://127.0.0.1:9".into(),
+        trurl_core::net::client_builder().build().unwrap(),
+        Arc::new(|_| {}),
+        Arc::new(|_| {}),
+    );
+    assert_eq!(part_len(&s, &id), have);
+    assert_eq!(again.list()[0].done, have);
 }

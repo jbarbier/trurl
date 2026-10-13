@@ -59,8 +59,20 @@ python3 scripts/make_usb_bundle.py --linux       # also the Linux terminal versi
 ```
 
 - **The installer** is downloaded from GitHub Releases, for the version written in
-  `pins.json` of your copy of the repository. That release must be published. To use
-  an installer you already have, add `--installer path\to\Trurl_0.1.0_x64-offline-setup.exe`.
+  `pins.json` of your copy of the repository, and checked against the release's
+  `SHA256SUMS.txt`. That release must be published.
+- **Before the first release**, take the installer that CI built: on GitHub, open
+  **Actions**, then the latest green **CI** run, then download the
+  **windows-installer-and-screenshots** artifact. Unzip it; the installer is
+  `usb/Trurl_<version>_x64-offline-setup.exe`. Then:
+  ```
+  python scripts/make_usb_bundle.py --installer path\to\Trurl_0.1.0_x64-offline-setup.exe
+  ```
+- **A stick for Linux computers only**, with a terminal version you built yourself
+  (see [BUILDING.md](BUILDING.md), "Terminal app"):
+  ```
+  python3 scripts/make_usb_bundle.py --no-windows --linux-tarball dist/trurl-0.1.0-linux-x64.tar.gz
+  ```
 - **The models** are downloaded once into a cache folder (`~/.cache/trurl/models`),
   with each file checked against its SHA-256 fingerprint, then copied into the folder.
 - **The result** is `dist/Trurl-<version>-USB/`. Copy the whole folder onto each stick.
@@ -97,6 +109,17 @@ Get-Content SHA256SUMS.txt | % { $h,$f = $_ -split '  ',2; if ((Get-FileHash $f)
   `licenses/`.
 
 ## On the learner's computer
+
+**Windows 11 and Smart App Control.** Until Trurl's installer is code-signed (see
+[RELEASING.md](RELEASING.md)), two Windows protections react to it:
+
+- **SmartScreen** shows "Windows protected your PC". Click **More info**, then
+  **Run anyway**. This is normal for a new, unsigned program.
+- **Smart App Control** (some new Windows 11 computers) blocks it with no way to run
+  it anyway. It can only be turned off in **Windows Security**, **App & browser
+  control**, **Smart App Control settings**, and Windows does not let you turn it
+  back on without reinstalling. Decide this with the computer's owner. Signing
+  the installer removes the problem for everyone.
 
 - **Where the models go:** `%LOCALAPPDATA%\CyberiadLabs\Trurl\models` on Windows.
 - **Updates never touch them.** Uninstalling keeps them too, unless the learner ticks

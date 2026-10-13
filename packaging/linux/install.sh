@@ -18,11 +18,11 @@ if [ "${1:-}" = "--remove" ]; then
   rm -rf "$APP" "$BIN/trurl"
   echo "Trurl removed."
   if [ -d "$DATA/models" ]; then
-    printf "Also delete your models in %s? [y/N] " "$DATA/models"
+    printf "Also delete your models, settings and Hugging Face token in %s? [y/N] " "$DATA"
     read -r answer || answer=n
     case "$answer" in
-      y|Y) rm -rf "$DATA"; echo "Models deleted." ;;
-      *) echo "Models kept." ;;
+      y|Y) rm -rf "$DATA"; echo "Models and settings deleted." ;;
+      *) echo "Models and settings kept." ;;
     esac
   fi
   exit 0

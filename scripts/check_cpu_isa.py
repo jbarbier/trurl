@@ -65,8 +65,14 @@ def scan(exe: Path) -> Counter:
 
 
 def objects(build_root: Path, variant: str) -> list[Path]:
+    """llama.cpp's compiled code for one tier: the object files (the .lib/.a
+    archives only repeat them). CMake's own compiler probes are not ours."""
     d = build_root / variant
-    return sorted(p for p in d.rglob("*") if p.suffix.lower() in (".lib", ".a", ".obj", ".o") and p.is_file())
+    return sorted(
+        p
+        for p in d.rglob("*")
+        if p.suffix.lower() in (".obj", ".o") and p.is_file() and "CompilerId" not in str(p) and "CMakeScratch" not in str(p)
+    )
 
 
 def main() -> int:
@@ -81,8 +87,13 @@ def main() -> int:
                 print(f"skip {variant}: no build folder under {root}")
                 continue
             c = Counter()
+            per_file = {}
             for f in files:
-                c.update(scan(f))
+                fc = scan(f)
+                c.update(fc)
+                hits = sum(fc[k] for k in forbidden)
+                if hits:
+                    per_file[f] = (hits, dict((k, fc[k]) for k in forbidden if fc[k]))
             exe = root / variant
         else:
             exe = next((p for p in [root / variant / "llama-server", root / variant / "llama-server.exe"] if p.exists()), None)
@@ -95,6 +106,9 @@ def main() -> int:
         if found:
             bad += 1
             print(f"FAIL {variant}: uses {found}  ({summary})")
+            if object_mode:
+                for f, (n, what) in sorted(per_file.items(), key=lambda kv: -kv[1][0])[:15]:
+                    print(f"       {n:5d}  {f.relative_to(root)}  {what}")
         else:
             print(f"ok   {variant}: {summary}")
     return 1 if bad else 0

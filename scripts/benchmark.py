@@ -210,16 +210,30 @@ class Trurl(App):
         # test's own "new chat" and event connection are not the learner's wait.
         self.t_send = time.time()
         self.call("send", {"text": prompt})
-        for raw in r:
-            line = raw.decode().strip()
-            if not line.startswith("data:"):
-                continue
-            ev = json.loads(line[5:])
-            if ev["type"] == "turn_delta" and ev.get("answer"):
-                yield 1
-            elif ev["type"] == "turn_finished":
-                r.close()
-                return
+        finished = False
+        try:
+            for raw in r:
+                line = raw.decode().strip()
+                if not line.startswith("data:"):
+                    continue
+                ev = json.loads(line[5:])
+                if ev["type"] == "turn_delta" and ev.get("answer"):
+                    yield 1
+                elif ev["type"] == "turn_finished":
+                    finished = True
+                    return
+        finally:
+            # The other apps stop at MAX_TOKENS by request; Trurl has no such
+            # limit (learners see whole answers), so stop it the way a learner
+            # would and wait until it is done, or the next question would wait
+            # for this answer to be cancelled.
+            if not finished:
+                self.call("stop")
+                for raw in r:
+                    line = raw.decode().strip()
+                    if line.startswith("data:") and json.loads(line[5:])["type"] == "turn_finished":
+                        break
+            r.close()
 
     def stop(self):
         super().stop()
@@ -496,7 +510,7 @@ def render(data: dict) -> tuple[str, str]:
         v = f.format(r[k])
         if k == "tokens_per_s" and "tokens_per_s_range" in r:
             lo, hi = r["tokens_per_s_range"]
-            v = f"{r[k]} ({lo} to {hi})"
+            v = f"{r[k]} tokens/s ({lo} to {hi})"
             return f"**{v}**" if tied(r) else v
         return f"**{v}**" if r[k] == best[k] else v
 
@@ -510,7 +524,7 @@ def render(data: dict) -> tuple[str, str]:
         return f"answers in {max(1, int(m.group(1)))} s" if m else v.replace("fails to load", "does not start")
 
     low += "".join("| " + app + " | " + " | ".join(plain(v[c]) for c in caps) + " |\n" for app, v in data["low_ram"].items())
-    setup = (f"{m['cpu']}, {m['threads']} threads, {m['ram_gb']} GB RAM, no GPU. Model: `{data['model']}` for every app, "
+    setup = (f"{m.get('label') or m['cpu']}, {m['threads']} threads, {m['ram_gb']} GB RAM, no GPU. Model: `{data['model']}` for every app, "
              f"context 2,048, temperature 0, answers of up to {data['max_tokens']} tokens, median of {len(PROMPTS)} prompts "
              f"x {data.get('rounds', 2)} rounds (the apps take turns each round). Speed in brackets: the middle half of the answers. "
              f"Measured {data['date']} by `scripts/benchmark.py`.")
@@ -522,7 +536,9 @@ def render(data: dict) -> tuple[str, str]:
         "the difference is within the noise of the machine.\n\n" + table + "\n"
         "- **App on disk:** the program without the model. For Trurl: the terminal app plus its three llama-server builds.\n"
         "- **Load time:** from starting the app to the first possible answer, model already in the disk cache. Median of the rounds.\n"
-        "- **Speed:** the three apps run the same engine family (llama.cpp), so speed mostly depends on the llama.cpp version and how it was compiled.\n"
+        "- **Speed:** words (tokens) per second as they appear while the answer streams. All three apps compute with the same "
+        "library (ggml), and the engines' own timers agree: about 11.7 tokens/s each for this model on this machine. "
+        "Ollama 0.40 runs Gemma 3 with its own engine and streams it about 13% faster; llamafile is slower.\n"
         "- **RAM:** proportional set size (PSS) of every process of the app, so shared pages count once. The model's 806 MB of weights are memory-mapped and counted here.\n"
         "- **CPU, idle:** with the model loaded and nothing asked, over 20 seconds. Anything above 0% drains a laptop battery for nothing.\n\n"
         "## When memory is short\n\nEach app started inside a memory limit (cgroup, no swap), then asked to answer one short question.\n\n" + low + "\n"
@@ -557,6 +573,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--model")
     ap.add_argument("--render", help="only rebuild docs/BENCHMARKS.md and the README table from this JSON")
+    ap.add_argument("--machine-label", help="how to name the test machine in the docs (stored in the JSON)")
     ap.add_argument("--trurl", default=str(ROOT / "target/release/trurl-bridge"))
     ap.add_argument("--trurl-tui", default=str(ROOT / "target/release/trurl"))
     ap.add_argument("--ollama")
@@ -568,6 +585,10 @@ def main() -> None:
     ap.add_argument("--json", default=str(ROOT / "target/bench.json"))
     a = ap.parse_args()
     if a.render:
+        if a.machine_label:
+            data = json.loads(Path(a.render).read_text())
+            data["machine"]["label"] = a.machine_label
+            Path(a.render).write_text(json.dumps(data, indent=2))
         write_docs(Path(a.render))
         return
     model = Path(a.model).expanduser().resolve()
@@ -595,7 +616,7 @@ def main() -> None:
 
     meminfo = Path("/proc/meminfo").read_text().split("\n")[0].split()[1]
     out = {
-        "machine": {"cpu": cpu_name(), "threads": a.threads, "ram_gb": round(int(meminfo) / 1024 / 1024, 1)},
+        "machine": {"cpu": cpu_name(), "label": a.machine_label, "threads": a.threads, "ram_gb": round(int(meminfo) / 1024 / 1024, 1)},
         "model": model.name,
         "max_tokens": MAX_TOKENS,
         "rounds": a.runs,

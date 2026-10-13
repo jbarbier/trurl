@@ -232,10 +232,11 @@ const MAX_JSON: usize = 16 * 1024 * 1024;
 const MAX_README: usize = 1024 * 1024;
 
 fn hub_error(e: reqwest::Error) -> UserError {
-    if crate::net::is_offline(&e) {
-        UserError::offline().with_detail(e.to_string())
-    } else {
-        UserError::hub_failed().with_detail(e.to_string())
+    let detail = crate::errors::chain(&e);
+    match crate::net::classify(&e) {
+        crate::net::NetFailure::Offline => UserError::offline().with_detail(detail),
+        crate::net::NetFailure::Tls => UserError::hub_tls().with_detail(detail),
+        crate::net::NetFailure::Other => UserError::hub_failed().with_detail(detail),
     }
 }
 

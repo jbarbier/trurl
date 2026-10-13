@@ -500,7 +500,10 @@ async fn new_chat_during_an_answer_frees_the_chat() {
 #[ignore]
 async fn a_model_with_accents_in_its_name_and_folder_loads() {
     let tiny = models_src().join("stories260K-f32.gguf");
-    assert!(tiny.exists(), "scripts/run_evals.sh fetches stories260K-f32.gguf; run it first");
+    assert!(
+        tiny.exists(),
+        "scripts/run_evals.sh fetches stories260K-f32.gguf; run it first"
+    );
     let name = "Modèle été ünïcode.gguf";
     let h = harness_in("Amédée Ngozi", &[], |home| {
         let models = home.join("Amédée Ngozi").join("models");
@@ -535,8 +538,10 @@ async fn an_update_never_cuts_off_an_answer() {
     assert_eq!(refused.code, trurl_core::ErrorCode::UpdateBusy);
     assert!(h.app.is_generating(), "the answer goes on");
     h.app.stop_generation();
-    h.wait("generating false", 30, |app, _| (!app.is_generating()).then_some(()))
-        .await;
+    h.wait("generating false", 30, |app, _| {
+        (!app.is_generating()).then_some(())
+    })
+    .await;
     h.app.release_engine().await.unwrap();
     let held = h.app.send("Hello?").unwrap_err();
     assert_eq!(held.title, "Trurl is installing an update.");

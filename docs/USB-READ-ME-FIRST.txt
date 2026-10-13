@@ -8,6 +8,9 @@ ON A WINDOWS 10 OR 11 COMPUTER
 1. Double-click Trurl_..._x64-offline-setup.exe
 2. If Windows says "Windows protected your PC", click "More info", then
    "Run anyway". (This message shows for new programs that are not signed yet.)
+   If Windows 11 says Smart App Control blocked it, there is no "Run anyway":
+   see "Smart App Control" in docs/USB-BUNDLE.md on the Trurl GitHub page
+   before you change anything.
 3. Read the licenses, click "I Agree", then "Install". The installer copies the
    models from the "models" folder: this takes 2 to 6 minutes. Do not remove the
    stick until it says it is finished.
@@ -26,7 +29,7 @@ ON A LINUX COMPUTER (if there is a "linux" folder on this stick)
 
 WHAT IS ON THIS STICK
 
-  models/             Gemma 3 1B (806 MB), Gemma 3 4B (2.5 GB), Qwen3 0.6B (484 MB)
+  models/             Gemma 3 1B Instruct (806 MB), Gemma 3 4B Instruct (2.5 GB), Qwen3 0.6B (484 MB)
   LICENSES/           Gemma Terms of Use and every other license
   SHA256SUMS.txt      to check that a copy is complete
 

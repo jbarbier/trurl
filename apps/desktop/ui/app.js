@@ -895,7 +895,7 @@
         h("span", { text: `${fmt.size(d.done)} of ${fmt.size(d.size)}` }),
         ...(d.status === "running" && d.rate > 0 ? [h("span", { text: fmt.size(d.rate) + "/s" })] : [])
       );
-      const hint = d.status === "failed" && d.error ? `${d.error.title} ${d.error.hint || ""}`.trim() : d.status === "retrying" ? "The connection dropped. Trurl tries again by itself." : "";
+      const hint = d.status === "failed" && d.error ? `${d.error.title} ${d.error.hint || ""}`.trim() : d.status === "retrying" ? (d.error ? `${d.error.title} Trying again in a moment.` : "The connection dropped. Trurl tries again by itself.") : "";
       li.ui.hint.textContent = hint;
       li.ui.hint.hidden = !hint;
       li.ui.hint.style.color = d.status === "retrying" ? "var(--ink3)" : "";

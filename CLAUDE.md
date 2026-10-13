@@ -59,7 +59,9 @@ The core is the contract. Front ends never talk to llama-server or the network d
 ## Gates
 
 ```
-cargo test                                 # unit + integration (local HTTP servers, no models)
+cargo fmt --all --check                    # formatting, as CI
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked                        # unit + integration (local HTTP servers, no models)
 python3 scripts/check_pins.py              # versions agree, vendored hashes, README table, licenses fresh
 python3 scripts/check_copy.py              # UI copy voice rules
 python3 scripts/check_network.py           # no URL outside the allowlist
@@ -91,7 +93,7 @@ To change the version: `python3 scripts/bump_version.py X.Y.Z` (never by hand).
 ## Pinned versions
 
 Never bump a version as a side effect. A bump is its own PR: update `pins.json`, run
-`fetch_deps.py` (it re-verifies every hash), run the eval lane, update the README table
+`build_llama.py` and `fetch_models.py` (they re-verify every hash), run the eval lane, update the README table
 (`check_pins.py` fails until you do).
 
 ## Repo hygiene (public repo)

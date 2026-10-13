@@ -16,6 +16,8 @@ const MAX_STRING: u64 = 16 * 1024 * 1024; // chat templates are a few KB; 16 MB 
 const MAX_KV: u64 = 100_000;
 /// Keys are names like `general.architecture`: a few dozen bytes.
 const MAX_KEY: u64 = 64 * 1024;
+/// All keys together. Real models have a few dozen keys, a few KB in all.
+const MAX_KEYS_TOTAL: u64 = 1024 * 1024;
 /// Strings Trurl keeps (`general.*`, the chat template), all together. A file
 /// that asks for more is not a model worth trusting with the learner's memory:
 /// the rest is skipped, not read.
@@ -89,6 +91,8 @@ struct Reader<T: Read + Seek> {
     r: T,
     /// Bytes of strings kept so far (see MAX_KEPT_TOTAL).
     kept: u64,
+    /// Bytes of keys read so far (see MAX_KEYS_TOTAL).
+    kept_keys: u64,
 }
 
 impl<T: Read + Seek> Reader<T> {
@@ -124,9 +128,10 @@ impl<T: Read + Seek> Reader<T> {
     }
     fn key(&mut self) -> R<String> {
         let n = self.u64()?;
-        if n > MAX_KEY {
+        if n > MAX_KEY || self.kept_keys + n > MAX_KEYS_TOTAL {
             return Err(GgufError::Malformed(format!("key of {n} bytes")));
         }
+        self.kept_keys += n;
         let mut b = vec![0u8; n as usize];
         self.r.read_exact(&mut b)?;
         Ok(String::from_utf8_lossy(&b).into_owned())
@@ -219,7 +224,11 @@ pub fn read(path: &Path) -> R<GgufInfo> {
 }
 
 pub fn read_from<T: Read + Seek>(r: T) -> R<GgufInfo> {
-    let mut rd = Reader { r, kept: 0 };
+    let mut rd = Reader {
+        r,
+        kept: 0,
+        kept_keys: 0,
+    };
     let mut magic = [0u8; 4];
     match rd.r.read_exact(&mut magic) {
         Ok(()) => {}
@@ -434,6 +443,35 @@ mod tests {
     use super::testfile::*;
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn a_file_with_endless_keys_is_refused_before_it_fills_the_memory() {
+        // 40 keys of 60 KB: each key is allowed, together they are not.
+        let names: Vec<String> = (0..40)
+            .map(|i| format!("{i}{}", "k".repeat(60_000)))
+            .collect();
+        let kv: Vec<(&str, V)> = names.iter().map(|n| (n.as_str(), V::U32(1))).collect();
+        let b = build(&kv, &[], 0);
+        assert!(matches!(
+            read_from(Cursor::new(&b)),
+            Err(GgufError::Malformed(_))
+        ));
+    }
+
+    #[test]
+    fn huge_kept_strings_are_skipped_not_kept() {
+        let big = "x".repeat(5 * 1024 * 1024);
+        let b = build(
+            &[
+                ("general.architecture", V::Str("gemma3")),
+                ("general.description", V::Str(&big)),
+            ],
+            &[],
+            0,
+        );
+        let i = read_from(Cursor::new(&b)).unwrap();
+        assert_eq!(i.architecture.as_deref(), Some("gemma3"));
+    }
 
     #[test]
     fn reads_the_fields_trurl_uses() {

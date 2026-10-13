@@ -4,6 +4,7 @@ on the learners' computers. See docs/USB-BUNDLE.md.
 
   python3 scripts/make_usb_bundle.py                       # latest release from GitHub
   python3 scripts/make_usb_bundle.py --installer path/to/Trurl_0.1.0_x64-offline-setup.exe
+  python3 scripts/make_usb_bundle.py --no-windows --linux-tarball dist/trurl-0.1.0-linux-x64.tar.gz
   python3 scripts/make_usb_bundle.py --only gemma-3-1b-it,qwen3-0.6b   # smaller stick
   python3 scripts/make_usb_bundle.py --extra-model ~/Downloads/phi-4-mini-Q4_K_M.gguf
 
@@ -91,7 +92,9 @@ def main() -> None:
     ap.add_argument("--version", default=PINS["app"]["version"])
     ap.add_argument("--only", default="", help="comma-separated model ids from pins.json")
     ap.add_argument("--extra-model", action="append", default=[], help="another .gguf to include")
-    ap.add_argument("--linux", action="store_true", help="also include the Linux tarball")
+    ap.add_argument("--linux", action="store_true", help="also include the Linux tarball from the release")
+    ap.add_argument("--linux-tarball", help="include this Linux tarball (your own build) instead of the release's")
+    ap.add_argument("--no-windows", action="store_true", help="no Windows installer (a stick for Linux computers only)")
     ap.add_argument("--models-cache", default=str(Path.home() / ".cache" / "trurl" / "models"))
     ap.add_argument("--out", default=str(ROOT / "dist"))
     a = ap.parse_args()
@@ -101,8 +104,11 @@ def main() -> None:
     (out / "models").mkdir(parents=True, exist_ok=True)
 
     exe_name = f"Trurl_{v}_x64-offline-setup.exe"
-    release = None if a.installer and not a.linux else release_sums(v)
-    if a.installer:
+    need_release = (not a.no_windows and not a.installer) or (a.linux and not a.linux_tarball)
+    release = release_sums(v) if need_release else None
+    if a.no_windows:
+        pass
+    elif a.installer:
         shutil.copy2(a.installer, out / exe_name)
         print(f"note {exe_name} is your own build: not checked against a release")
     else:
@@ -110,12 +116,16 @@ def main() -> None:
             download(f"https://github.com/{REPO}/releases/download/v{v}/{exe_name}", out / exe_name)
         check(out / exe_name, release)
 
-    if a.linux:
+    if a.linux or a.linux_tarball:
         (out / "linux").mkdir(exist_ok=True)
         tgz = f"trurl-{v}-linux-x64.tar.gz"
-        if not (out / "linux" / tgz).exists():
-            download(f"https://github.com/{REPO}/releases/download/v{v}/{tgz}", out / "linux" / tgz)
-        check(out / "linux" / tgz, release)
+        if a.linux_tarball:
+            shutil.copy2(a.linux_tarball, out / "linux" / tgz)
+            print(f"note {tgz} is your own build: not checked against a release")
+        else:
+            if not (out / "linux" / tgz).exists():
+                download(f"https://github.com/{REPO}/releases/download/v{v}/{tgz}", out / "linux" / tgz)
+            check(out / "linux" / tgz, release)
 
     # Models: fetch into the cache once (resumable, hash-checked), then copy.
     ids = [m["id"] for m in PINS["models"]] if not a.only else [x.strip() for x in a.only.split(",")]
@@ -136,7 +146,17 @@ def main() -> None:
 
     shutil.copytree(ROOT / "licenses", out / "LICENSES", dirs_exist_ok=True)
     shutil.copy2(ROOT / "LICENSE", out / "LICENSES" / "Trurl-MIT.txt")
-    shutil.copy2(ROOT / "docs" / "USB-READ-ME-FIRST.txt", out / "READ-ME-FIRST.txt")
+    # The read-me lists the models really on this stick.
+    def gb(n: int) -> str:
+        return f"{n / 1e9:.1f} GB" if n >= 1e9 else f"{round(n / 1e6)} MB"
+
+    on_stick = sorted((out / "models").glob("*.gguf"))
+    names = {m["file"]: m.get("name", m["file"]) for m in PINS["models"]}
+    listing = ", ".join(f"{names.get(f.name, f.name)} ({gb(f.stat().st_size)})" for f in on_stick)
+    readme = (ROOT / "docs" / "USB-READ-ME-FIRST.txt").read_text()
+    marker = "  models/             "
+    lines = [(marker + listing) if l.startswith(marker) else l for l in readme.splitlines()]
+    (out / "READ-ME-FIRST.txt").write_text("\n".join(lines) + "\n")
 
     sums = []
     for p in sorted(out.rglob("*")):

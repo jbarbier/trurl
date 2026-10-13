@@ -289,9 +289,11 @@ Offline or failed checks are silent.
 data folder.
 
 **The signing key** never touches a build. Builds do not sign
-(`createUpdaterArtifacts` is off). The release workflow signs in one step of a job
-that builds no project code, with `tauri signer sign --app-version`. Then it checks
-every signature with the same code the apps use (`examples/verify_update.rs`).
+(`createUpdaterArtifacts` is off). The release workflow signs in one step of the
+`publish` job, with `tauri signer sign --app-version` from the locked Tauri CLI,
+installed before the key enters the environment. Only that step sees the key. A
+later step, which never sees it, checks every signature with the same code the apps
+use (`examples/verify_update.rs`).
 
 ## Distribution
 

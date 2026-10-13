@@ -53,6 +53,9 @@ impl Settings {
 
     /// Write atomically: a crash mid-write leaves the old file intact.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        // One save at a time: two threads sharing the temporary file would mix.
+        static SAVING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _one = SAVING.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
@@ -73,7 +76,12 @@ impl Settings {
             f.sync_all()?;
         }
         #[cfg(not(unix))]
-        std::fs::write(&tmp, &bytes)?;
+        {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(&bytes)?;
+            f.sync_all()?;
+        }
         std::fs::rename(&tmp, path)
     }
 

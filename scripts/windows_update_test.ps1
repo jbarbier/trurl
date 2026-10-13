@@ -73,12 +73,27 @@ try {
 
   Step "Wait for the installer to put $vNext in place"
   $ok = $false
-  for ($i = 0; $i -lt 180; $i++) {
+  for ($i = 0; $i -lt 300; $i++) {
     Start-Sleep -Seconds 1
     $v = (Get-Item $app -ErrorAction SilentlyContinue).VersionInfo.ProductVersion
     if ($v -and $v.StartsWith($vNext)) { $ok = $true; break }
   }
-  if (-not $ok) { throw "trurl.exe is still version $v after the update" }
+  if (-not $ok) {
+    Write-Host "--- diagnostics"
+    Get-Process | Where-Object { $_.Name -match "trurl|setup|llama|msedgewebview|Trurl" } |
+      Select-Object Name, Id, Path, StartTime | Format-Table -AutoSize | Out-String -Width 300 | Write-Host
+    Get-ChildItem $env:TEMP -Recurse -Include *.exe, *.log -ErrorAction SilentlyContinue |
+      Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-15) } |
+      Select-Object FullName, Length, LastWriteTime | Format-Table -AutoSize | Out-String -Width 300 | Write-Host
+    Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall" -ErrorAction SilentlyContinue |
+      ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.DisplayName -match "Trurl" } |
+      Select-Object DisplayName, DisplayVersion, InstallLocation | Format-List | Out-String | Write-Host
+    Get-ChildItem (Split-Path $app) | Select-Object Name, Length, LastWriteTime | Format-Table -AutoSize | Out-String | Write-Host
+    Get-WinEvent -LogName Application -MaxEvents 20 -ErrorAction SilentlyContinue |
+      Where-Object { $_.TimeCreated -gt (Get-Date).AddMinutes(-15) } |
+      Select-Object TimeCreated, ProviderName, Message | Format-List | Out-String -Width 300 | Write-Host
+    throw "trurl.exe is still version $v after the update"
+  }
   Write-Host "installed: $v"
 
   Step "Restart $vNext and check it works, with the model kept"

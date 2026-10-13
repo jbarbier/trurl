@@ -98,6 +98,7 @@ impl App {
     /// Must be called inside a tokio runtime.
     pub fn start(cfg: AppConfig, sink: Sink) -> App {
         let _ = cfg.paths.ensure();
+        crate::server::LogFile::rotate(&cfg.paths.logs().join("llama-server.log"));
         crate::server::remove_stale_key_files(&cfg.paths.models());
         let hw = Hardware::detect();
         let settings = Settings::load(&cfg.paths.settings());
@@ -537,6 +538,11 @@ impl App {
 
     /// Stop whatever runs, start llama-server with `file`, report progress.
     pub fn load(&self, file: String) {
+        // An update is installing: the model server must stay down (its files are
+        // being replaced). `reload()` lifts the hold if the install fails.
+        if self.inner.state.lock().unwrap().held {
+            return;
+        }
         self.stop_generation();
         let cancel = CancellationToken::new();
         if let Some(old) = self
