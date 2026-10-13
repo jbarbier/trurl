@@ -10,6 +10,7 @@ use crate::downloads::{DownloadInfo, DownloadRequest, Downloads};
 use crate::errors::UserError;
 use crate::events::{CourseModel, EngineState, Event, HardwareSummary, PublicSettings, Snapshot};
 use crate::hardware::{CpuVariant, Hardware};
+use crate::history::{Chat, ChatSummary, History};
 use crate::hub::{HF_BASE, Hub, RepoFiles, RepoHit};
 use crate::models::{self, ModelInfo, VerifiedCache};
 use crate::paths::Paths;
@@ -53,6 +54,19 @@ struct State {
     engine: EngineState,
     turns: Vec<Turn>,
     next_turn: u64,
+    /// The chat on screen in the history (None until its first answer is saved).
+    chat_id: Option<String>,
+    chat_created: u64,
+    /// The model of the chat's last answer: saved with it, never the model
+    /// merely selected while looking at the chat.
+    chat_model: Option<String>,
+    /// Bumped when the chat on screen changes (a question is sent); a chat is
+    /// written when it is left only if it changed since it was last saved, so
+    /// looking at a chat never moves it to the top of the list.
+    chat_rev: u64,
+    saved_rev: u64,
+    /// The saved chats, newest first (kept in step with the files).
+    chats: Vec<ChatSummary>,
     generating: bool,
     /// Set while an update installs: no new answer may start.
     held: bool,
@@ -72,6 +86,9 @@ struct Endpoint {
 
 struct Inner {
     paths: Paths,
+    history: History,
+    /// Chat history writes, one at a time.
+    history_io: Mutex<()>,
     /// Settings writes, one at a time (see `save_settings`).
     settings_io: Mutex<()>,
     hw: Hardware,
@@ -95,6 +112,15 @@ pub struct App {
     inner: Arc<Inner>,
 }
 
+/// A new, empty chat on screen.
+fn clear_chat(st: &mut State) {
+    st.turns.clear();
+    st.chat_id = None;
+    st.chat_model = None;
+    st.chat_rev += 1;
+    st.saved_rev = st.chat_rev;
+}
+
 impl App {
     /// Build the app and load the selected model in the background.
     /// Must be called inside a tokio runtime.
@@ -105,6 +131,8 @@ impl App {
         let hw = Hardware::detect();
         let settings = Settings::load(&cfg.paths.settings());
         let verified = VerifiedCache::load(&cfg.paths.verified_cache());
+        let history = History::new(cfg.paths.chats());
+        let chats = history.list();
         // llama-server is local: never send its traffic through a proxy.
         let local_http = crate::net::client_builder()
             .no_proxy()
@@ -119,6 +147,8 @@ impl App {
         let app = App {
             inner: Arc::new(Inner {
                 paths: cfg.paths,
+                history,
+                history_io: Mutex::new(()),
                 hw,
                 llama_root: cfg.llama_root,
                 hf_base: cfg.hf_base,
@@ -131,6 +161,12 @@ impl App {
                     engine: EngineState::Idle,
                     turns: Vec::new(),
                     next_turn: 1,
+                    chat_id: None,
+                    chat_created: 0,
+                    chat_model: None,
+                    chat_rev: 0,
+                    saved_rev: 0,
+                    chats,
                     generating: false,
                     held: false,
                     verified,
@@ -239,6 +275,8 @@ impl App {
                     download_id: crate::downloads::download_id(&m.repo, &m.file, &m.revision),
                 })
                 .collect(),
+            chats: st.chats.clone(),
+            chat_id: st.chat_id.clone(),
         }
     }
 
@@ -762,8 +800,247 @@ impl App {
 
     pub fn new_chat(&self) {
         self.stop_generation();
-        self.inner.state.lock().unwrap().turns.clear();
+        // An answer still being written is kept in the history as stopped. The
+        // screen is cleared under the same lock, so that answer's own save,
+        // arriving late, finds its turn gone and cannot write the chat again.
+        // If the chat could not be saved (disk full), it stays on screen.
+        if !self.leave_chat(clear_chat) {
+            return;
+        }
         self.emit(Event::ChatCleared);
+        self.emit_chats();
+    }
+
+    // ----- chat history -------------------------------------------------------
+
+    pub fn chats(&self) -> Vec<ChatSummary> {
+        self.inner.state.lock().unwrap().chats.clone()
+    }
+
+    fn emit_chats(&self) {
+        let (chats, chat_id) = {
+            let st = self.inner.state.lock().unwrap();
+            (st.chats.clone(), st.chat_id.clone())
+        };
+        self.emit(Event::Chats { chats, chat_id });
+    }
+
+    fn history_lock(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.inner
+            .history_io
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Save the chat on screen if it changed, then change the screen with
+    /// `then`, both under the history lock: nothing can be saved in between.
+    /// If the save failed, the screen is left as it is and this returns false.
+    fn leave_chat(&self, then: impl FnOnce(&mut State)) -> bool {
+        let _one = self.history_lock();
+        if !self.save_chat_locked(None, None) {
+            return false;
+        }
+        then(&mut self.inner.state.lock().unwrap());
+        true
+    }
+
+    /// After an answer: save its chat, if that chat is still the one on screen
+    /// (the learner may have opened another, or deleted this one, meanwhile).
+    fn save_after_answer(&self, turn_id: u64, model_file: &str) {
+        let _one = self.history_lock();
+        self.save_chat_locked(Some(turn_id), Some(model_file));
+    }
+
+    /// Write the chat on screen to the history. Caller holds `history_io`.
+    /// `turn_id`: save only if this turn is still on screen. Returns false if
+    /// the write failed (the learner was told).
+    fn save_chat_locked(&self, turn_id: Option<u64>, model_file: Option<&str>) -> bool {
+        let chat = {
+            let mut st = self.inner.state.lock().unwrap();
+            if st.turns.is_empty() {
+                return true;
+            }
+            if let Some(id) = turn_id
+                && !st.turns.iter().any(|t| t.id == id)
+            {
+                return true;
+            }
+            if let Some(f) = model_file {
+                st.chat_model = Some(f.to_string());
+            }
+            // Leaving a chat that did not change since its last save: nothing to write.
+            if turn_id.is_none() && st.chat_rev == st.saved_rev && st.chat_id.is_some() {
+                return true;
+            }
+            let rev = st.chat_rev;
+            let now = crate::history::now();
+            if st.chat_id.is_none() {
+                // Never reuse the name of a chat already saved (a clock set back).
+                let mut id = crate::history::new_id();
+                while self.inner.history.exists(&id) {
+                    id = crate::history::new_id();
+                }
+                st.chat_id = Some(id);
+                st.chat_created = now;
+            }
+            let mut turns = st.turns.clone();
+            for t in &mut turns {
+                if t.status == TurnStatus::Streaming {
+                    t.status = TurnStatus::Stopped;
+                }
+            }
+            (
+                Chat {
+                    id: st.chat_id.clone().unwrap(),
+                    created: st.chat_created,
+                    updated: now.max(st.chat_created),
+                    model_file: st.chat_model.clone().or_else(|| st.settings.model.clone()),
+                    turns,
+                },
+                rev,
+            )
+        };
+        let (chat, rev) = chat;
+        if let Err(e) = self.inner.history.save(&chat) {
+            self.emit(Event::Notice {
+                error: UserError::from_io_write(&e, UserError::chat_save_failed()),
+            });
+            return false;
+        }
+        {
+            let mut st = self.inner.state.lock().unwrap();
+            if st.chat_id.as_deref() == Some(chat.id.as_str()) {
+                st.saved_rev = st.saved_rev.max(rev);
+            }
+            let s = chat.summary();
+            st.chats.retain(|c| c.id != s.id);
+            st.chats.insert(0, s);
+        }
+        self.emit_chats();
+        true
+    }
+
+    /// Open a saved chat to carry on: its questions and answers come back, and
+    /// so do the settings of its last answer (system prompt, temperature,
+    /// context size, model), so the next answer is written the same way.
+    pub fn open_chat(&self, id: &str) -> Result<(), UserError> {
+        // Check it can be read before stopping an answer for nothing.
+        if self.inner.history.load(id).is_none() {
+            return Err(UserError::chat_open_failed());
+        }
+        self.stop_generation();
+        let (settings, reload, gone) = {
+            let _one = self.history_lock();
+            // First keep the chat being left (with an answer cut short), then
+            // read the one to open: reopening the chat on screen reads what was
+            // just saved. If the chat being left cannot be saved, stay on it.
+            if !self.save_chat_locked(None, None) {
+                return Err(UserError::chat_save_failed());
+            }
+            let chat = self
+                .inner
+                .history
+                .load(id)
+                .ok_or_else(UserError::chat_open_failed)?;
+            let last = chat.turns.last().cloned();
+            let mut st = self.inner.state.lock().unwrap();
+            // Fresh turn ids: an answer of the chat being left may still finish,
+            // and must not find a turn of this one.
+            let mut turns = chat.turns.clone();
+            for t in &mut turns {
+                t.id = st.next_turn;
+                st.next_turn += 1;
+            }
+            st.turns = turns;
+            st.chat_id = Some(chat.id.clone());
+            st.chat_created = chat.created;
+            st.chat_model = chat.model_file.clone();
+            st.chat_rev += 1;
+            st.saved_rev = st.chat_rev;
+            let mut reload = None;
+            let mut gone = None;
+            if let Some(t) = &last {
+                st.settings.system_prompt = t.system_prompt.clone();
+                st.settings.temperature = settings::clamp_temperature(t.temperature);
+                let ctx = settings::clamp_context(t.context);
+                let ctx_changed = ctx != st.settings.context_size;
+                st.settings.context_size = ctx;
+                // The chat's model, if it is still here and readable; else keep
+                // the current one and say so.
+                let usable = chat
+                    .model_file
+                    .as_ref()
+                    .filter(|f| st.models.iter().any(|m| &m.file == *f && !m.broken));
+                if let Some(f) = chat.model_file.as_ref()
+                    && usable.is_none()
+                {
+                    let damaged = st.models.iter().any(|m| &m.file == f && m.broken);
+                    gone = Some(if damaged {
+                        UserError::chat_model_damaged(&t.model)
+                    } else {
+                        UserError::chat_model_gone(&t.model)
+                    });
+                }
+                let target = usable.cloned().or_else(|| st.settings.model.clone());
+                if target.is_some() && (ctx_changed || target != st.settings.model) {
+                    reload = target;
+                }
+            }
+            (st.settings.clone(), reload, gone)
+        };
+        self.save_settings(&settings);
+        if let Some(f) = reload {
+            self.load(f);
+        }
+        self.emit_snapshot();
+        self.emit_chats();
+        if let Some(error) = gone {
+            self.emit(Event::Notice { error });
+        }
+        Ok(())
+    }
+
+    /// Delete one saved chat. Deleting the chat on screen also clears it (an
+    /// answer being written stops), so it cannot be saved back.
+    pub fn delete_chat(&self, id: &str) -> Result<(), UserError> {
+        let on_screen = self.inner.state.lock().unwrap().chat_id.as_deref() == Some(id);
+        if on_screen {
+            self.stop_generation();
+        }
+        {
+            let _one = self.history_lock();
+            self.inner
+                .history
+                .delete(id)
+                .map_err(|e| UserError::chat_delete_failed().with_detail(e.to_string()))?;
+            let mut st = self.inner.state.lock().unwrap();
+            st.chats.retain(|c| c.id != id);
+            if st.chat_id.as_deref() == Some(id) {
+                clear_chat(&mut st);
+            }
+        }
+        if on_screen {
+            self.emit(Event::ChatCleared);
+        }
+        self.emit_chats();
+        Ok(())
+    }
+
+    /// Delete every saved chat (shared classroom computers), and clear the screen.
+    pub fn delete_all_chats(&self) -> Result<(), UserError> {
+        self.stop_generation();
+        let res = {
+            let _one = self.history_lock();
+            let res = self.inner.history.delete_all();
+            let left = self.inner.history.list();
+            let mut st = self.inner.state.lock().unwrap();
+            st.chats = left;
+            clear_chat(&mut st);
+            res
+        };
+        self.emit(Event::ChatCleared);
+        self.emit_chats();
+        res.map_err(|e| UserError::chat_delete_failed().with_detail(e.to_string()))
     }
 
     pub fn stop_generation(&self) {
@@ -823,6 +1100,7 @@ impl App {
                 context: st.settings.context_size,
             };
             st.turns.push(turn.clone());
+            st.chat_rev += 1;
             (turn, messages, st.settings.temperature)
         };
         *self.inner.gen_cancel.lock().unwrap() = Some((turn.id, cancel.clone()));
@@ -855,7 +1133,7 @@ impl App {
             let Some(t) = st.turns.iter_mut().find(|t| t.id == id) else {
                 return;
             };
-            match d {
+            let ev = match d {
                 StreamDelta::Reasoning(r) => {
                     t.reasoning.push_str(&r);
                     Event::TurnDelta {
@@ -888,7 +1166,10 @@ impl App {
                     t.thought_ms = Some(ms);
                     Event::TurnThought { id, ms }
                 }
-            }
+            };
+            // The chat changed since its last save: leaving it saves it again.
+            st.chat_rev += 1;
+            ev
         };
         self.emit(ev);
     }
@@ -908,6 +1189,9 @@ impl App {
                 .iter()
                 .filter(|t| t.id != id)
                 .all(|t| !t.in_history());
+            if st.turns.iter().any(|t| t.id == id) {
+                st.chat_rev += 1;
+            }
             st.turns.iter_mut().find(|t| t.id == id).map(|t| {
                 match end {
                     StreamEnd::Done => t.status = TurnStatus::Done,
@@ -950,10 +1234,16 @@ impl App {
                 *gc = None;
             }
         }
+        let finished = turn.is_some();
         if let Some(turn) = turn {
             self.emit(Event::TurnFinished { turn });
         }
         self.emit(Event::Generating { generating: false });
+        // Every finished answer goes into the history (a chat left meanwhile was
+        // saved when it was left).
+        if finished {
+            self.save_after_answer(id, &ep.file);
+        }
         if crashed {
             let still_same = self
                 .inner
@@ -1041,6 +1331,8 @@ impl App {
     pub async fn shutdown(&self) {
         self.inner.shutdown.cancel();
         self.stop_generation();
+        // An answer cut off by closing Trurl is kept, as stopped.
+        self.leave_chat(|_| {});
         self.downloads().pause_all();
         if let Some(c) = self.inner.load_cancel.lock().unwrap().take() {
             c.cancel();
@@ -1055,6 +1347,7 @@ impl App {
     pub fn shutdown_blocking(&self) {
         self.inner.shutdown.cancel();
         self.stop_generation();
+        self.leave_chat(|_| {});
         if let Ok(mut guard) = self.inner.server.try_lock()
             && let Some(mut s) = guard.take()
         {

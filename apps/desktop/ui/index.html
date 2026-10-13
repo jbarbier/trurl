@@ -75,6 +75,10 @@
           <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6.5 10 3l7 3.5-7 3.5zM3 10l7 3.5 7-3.5M3 13.5 10 17l7-3.5"/></svg>
           Models
         </button>
+        <button class="btn btn-quiet" id="openChats" type="button">
+          <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5h12v8H9l-4 3v-3H4z"/></svg>
+          Chats
+        </button>
         <button class="btn btn-quiet" id="openAbout" type="button">
           <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M10 9v5M10 6.2v.1"/></svg>
           About
@@ -144,6 +148,24 @@
         <ul class="model-list" id="modelList"></ul>
       </div>
       <div class="tabpanel" role="tabpanel" id="panelHub" aria-labelledby="tabHub" hidden></div>
+    </div>
+  </dialog>
+
+  <!-- Chats: the history, saved on this computer only -->
+  <dialog class="dlg" id="chatsDlg" aria-labelledby="chatsTitle">
+    <div class="dlg-head">
+      <h2 id="chatsTitle">Chats</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close">
+        <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg>
+      </button>
+    </div>
+    <div class="dlg-body" id="chatsBody">
+      <p class="muted">Every chat is saved on this computer, and only here. Open one to carry on where you stopped.</p>
+      <div id="chatsNote" role="alert"></div>
+      <ul class="model-list" id="chatList"></ul>
+      <div class="dlg-actions">
+        <button class="btn btn-danger-quiet" type="button" id="deleteAllChats">Delete all chats</button>
+      </div>
     </div>
   </dialog>
 

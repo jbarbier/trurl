@@ -231,6 +231,15 @@ against the same cases (`contracts/plainmath-cases.json`). Code is never touched
   says Trurl is already open and exits, instead of loading a second model a
   4 GB laptop cannot hold. The desktop app uses Tauri's single-instance plugin too.
 - `downloads/`: unfinished Hugging Face downloads.
+- `chats/`: the chat history, one `<id>.json` per chat (`history.rs`), with every
+  question, answer and reasoning, and the settings each answer was written with.
+  Saved after each answer (written to a temporary file and renamed), and before
+  leaving a chat, so an answer cut short by New chat or by opening another chat
+  is kept as stopped. A file that cannot be read is skipped (only "Delete all
+  chats" removes it). Ids
+  are digits and dashes only, so no id from a front end can name a file outside
+  the folder. Opening a chat sends its earlier turns back to the model exactly as
+  shown, like any chat, and restores the settings of its last answer.
 
 **What counts as a model.**
 

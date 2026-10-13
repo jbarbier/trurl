@@ -350,6 +350,17 @@ async fn on_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: Key
                     }
                     Confirm::Update { .. } => start_update(ui, core, tx),
                     Confirm::NewChat => core.new_chat(),
+                    Confirm::DeleteChat { id, .. } => {
+                        if let Err(e) = core.delete_chat(&id) {
+                            ui.notice = Some(e);
+                        }
+                    }
+                    Confirm::DeleteAllChats { .. } => {
+                        if let Err(e) = core.delete_all_chats() {
+                            ui.notice = Some(e);
+                        }
+                    }
+                    Confirm::OpenChat { id } => open_chat(ui, core, &id),
                     Confirm::Quit => ui.quit = true,
                     Confirm::ClearSystemPrompt => core.set_system_prompt(""),
                     Confirm::DiscardSystemPrompt => ui.prompt = None,
@@ -435,6 +446,10 @@ async fn on_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: Key
             open_hub(ui, core, tx);
             return;
         }
+        KeyCode::F(9) => {
+            ui.screen = Screen::Chats;
+            return;
+        }
         KeyCode::F(12) => {
             ui.screen = Screen::Token;
             ui.token.clear();
@@ -467,6 +482,7 @@ async fn on_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: Key
         Screen::Settings => settings_key(ui, core, k),
         Screen::Models => models_key(ui, core, tx, k),
         Screen::Hub => hub_key(ui, core, tx, k),
+        Screen::Chats => chats_key(ui, core, k),
         Screen::About => about_key(ui, tx, k),
         Screen::Token => match k.code {
             KeyCode::Esc => ui.screen = Screen::Chat,
@@ -792,6 +808,50 @@ fn models_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: KeyEv
         }
         KeyCode::Char('h') | KeyCode::Char('H') => open_hub(ui, core, tx),
         _ => {}
+    }
+}
+
+fn chats_key(ui: &mut Ui, core: &App, k: KeyEvent) {
+    let n = ui.chats.len();
+    let sel = ui.chats.get(ui.chats_sel).cloned();
+    match k.code {
+        KeyCode::Esc => ui.screen = Screen::Chat,
+        KeyCode::Up => ui.chats_sel = ui.chats_sel.saturating_sub(1),
+        KeyCode::Down => ui.chats_sel = (ui.chats_sel + 1).min(n.saturating_sub(1)),
+        KeyCode::Enter => {
+            let Some(c) = sel else { return };
+            if ui.chat_id.as_deref() == Some(c.id.as_str()) {
+                ui.screen = Screen::Chat;
+            } else if ui.generating {
+                ui.confirm = Some(Confirm::OpenChat { id: c.id });
+            } else {
+                open_chat(ui, core, &c.id);
+            }
+        }
+        KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Delete => {
+            if let Some(c) = sel {
+                let stops = ui.generating && ui.chat_id.as_deref() == Some(c.id.as_str());
+                ui.confirm = Some(Confirm::DeleteChat {
+                    id: c.id,
+                    title: c.title,
+                    stops,
+                });
+            }
+        }
+        KeyCode::Char('a') | KeyCode::Char('A') if n > 0 => {
+            ui.confirm = Some(Confirm::DeleteAllChats { count: n });
+        }
+        _ => {}
+    }
+}
+
+fn open_chat(ui: &mut Ui, core: &App, id: &str) {
+    match core.open_chat(id) {
+        Ok(()) => {
+            ui.screen = Screen::Chat;
+            ui.scroll = 0;
+        }
+        Err(e) => ui.notice = Some(e),
     }
 }
 

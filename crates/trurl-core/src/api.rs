@@ -72,6 +72,9 @@ pub async fn dispatch(app: &App, cmd: &str, args: Value) -> Result<Value, UserEr
             app.new_chat();
             ok()
         }
+        "open_chat" => app.open_chat(&arg::<Id>(&args)?.id).map(|_| Value::Null),
+        "delete_chat" => app.delete_chat(&arg::<Id>(&args)?.id).map(|_| Value::Null),
+        "delete_all_chats" => app.delete_all_chats().map(|_| Value::Null),
         "set_system_prompt" => {
             app.set_system_prompt(&arg::<Text>(&args)?.text);
             ok()

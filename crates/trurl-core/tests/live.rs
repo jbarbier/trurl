@@ -396,6 +396,46 @@ async fn system_prompt_is_obeyed_and_new_chat_forgets() {
     h.app.shutdown().await;
 }
 
+/// Chat history: each answer is saved; a chat opened later is carried on with
+/// its earlier turns sent back to the model, so the model still "remembers".
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn a_reopened_chat_carries_on_where_it_stopped() {
+    let h = harness(&[GEMMA], |_| {});
+    h.ready(GEMMA).await;
+    h.app.set_temperature(0.0);
+    h.ask("My name is Kofi and I live in Kumasi. Reply with OK only.")
+        .await;
+    let chats = h.app.chats();
+    assert_eq!(chats.len(), 1, "saved after the answer");
+    assert!(chats[0].title.starts_with("My name is Kofi"));
+    let id = chats[0].id.clone();
+
+    h.app.new_chat();
+    let t = h.ask("What is my name? One word.").await;
+    assert!(
+        !t.answer.contains("Kofi"),
+        "a new chat forgets: {}",
+        t.answer
+    );
+    assert_eq!(h.app.chats().len(), 2);
+
+    h.app.open_chat(&id).unwrap();
+    h.ready(GEMMA).await;
+    assert_eq!(h.app.turns().len(), 1);
+    let t = h.ask("What is my name? One word.").await;
+    assert!(
+        t.answer.contains("Kofi"),
+        "the old chat remembers: {}",
+        t.answer
+    );
+    // Saved into the same chat, not a new one.
+    assert_eq!(h.app.chats().len(), 2);
+    assert_eq!(h.app.chats()[0].id, id);
+    assert_eq!(h.app.chats()[0].turns, 2);
+    h.app.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn switching_models_restarts_the_server() {

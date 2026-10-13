@@ -76,6 +76,10 @@ impl Paths {
     pub fn logs(&self) -> PathBuf {
         self.home.join("logs")
     }
+    /// Saved chats, one file each (see `history`).
+    pub fn chats(&self) -> PathBuf {
+        self.home.join("chats")
+    }
     pub fn verified_cache(&self) -> PathBuf {
         self.home.join("verified.json")
     }

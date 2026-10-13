@@ -418,6 +418,42 @@ if (SUITE === "full") {
       }
     });
 
+  await step("chats: every chat is saved, opens with its settings and carries on, then deletes", async () => {
+    await closeDialogs();
+    await page.click("#openChats");
+    await page.locator(".chat-row").first().waitFor({ timeout: 10000 });
+    // The chats of the steps above, newest first; the pirate one among them.
+    const pirate = page.locator(".chat-row", { hasText: "Hello! Who are you?" }).first();
+    await pirate.waitFor({ timeout: 5000 });
+    await shot(page, "chats");
+    await pirate.getByRole("button", { name: /^Open the chat/ }).click();
+    await page.locator("#chatsDlg").waitFor({ state: "hidden", timeout: 10000 });
+    await waitPill("Ready", 300000);
+    if (!/pirate/.test(await page.inputValue("#sysPrompt"))) throw new Error("the chat's system prompt did not come back");
+    if ((await page.locator("#tempOut").textContent()) !== "0.0") throw new Error("the chat's temperature did not come back");
+    if (!(await page.locator(".turn", { hasText: "Hello! Who are you?" }).count())) throw new Error("the chat's turns did not come back");
+    // It carries on: the model sees the earlier turn and the system prompt.
+    await ask("What did I just ask you? Answer in one short sentence.");
+    // Written with the chat's system prompt and temperature (what the answer says it got).
+    const meta = await lastTurn().innerText();
+    if (!/Temperature 0\.0/.test(meta) || !/System prompt: .You are a friendly pirate/.test(meta)) throw new Error("the new answer was not written with the chat's settings: " + meta.slice(0, 200));
+    await page.click("#openChats");
+    const row = page.locator(".chat-row.current");
+    if (!/2 questions/.test(await row.innerText())) throw new Error("the new answer was not saved into the same chat: " + (await row.innerText()));
+    // Delete it: the screen clears.
+    await row.getByRole("button", { name: /^Delete the chat/ }).click();
+    await page.locator("#confirmOk").click();
+    await page.waitForFunction(() => !document.querySelector(".turn"), null, { timeout: 10000 });
+    // Delete all: the list is empty.
+    await page.click("#deleteAllChats");
+    await page.locator("#confirmOk").click();
+    await page.getByText("No saved chats yet.").waitFor({ timeout: 10000 });
+    await closeDialogs();
+    // Leave the settings as the next steps expect them.
+    if (await page.locator("#sysClear").isVisible()) await page.click("#sysClear");
+    if (await page.locator("#tempReset").isVisible()) await page.click("#tempReset");
+  });
+
   await step("about and licenses", async () => {
     await page.click("#openAbout");
     await page.locator(".licenses details").first().waitFor({ timeout: 10000 });
@@ -478,6 +514,10 @@ if (SUITE === "offline") {
     await shot(page, "hf-offline");
     await closeDialogs();
     await ask("Say hello.");
+    // Saved with no internet: the history never needs it.
+    await page.click("#openChats");
+    await page.locator(".chat-row", { hasText: "Say hello." }).waitFor({ timeout: 10000 });
+    await closeDialogs();
   });
 }
 

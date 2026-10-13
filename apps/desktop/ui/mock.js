@@ -8,6 +8,7 @@
 //   chat      a conversation already on screen, with reasoning
 //   oldcpu    a 2008 laptop (SSSE3 engine): Hugging Face recommends Q4_0 files
 //   coursestates  each course row state: damaged, failed download, a look-alike file
+//   chats     three saved chats in the history
 // Timings are short but real enough to see streaming and loading states.
 
 (function () {
@@ -43,8 +44,36 @@
       generating: false,
       downloads: [],
       course_models: COURSE.map(({ repo, ...c }) => ({ ...c, download_id: (repo + c.file).replace(/\W/g, "").slice(-16) })),
+      chats: [],
+      chat_id: null,
     };
     let nextTurn = 1;
+    // Saved chats, as the core's history: id -> { id, created, updated, turns }.
+    const saved = new Map();
+    const DAY = 86400;
+    const nowS = () => Math.floor(Date.now() / 1000);
+    const summary = (c) => ({ id: c.id, title: (c.turns[0].user.split("\n").find((l) => l.trim()) || "").trim().slice(0, 60), updated: c.updated, turns: c.turns.length, model: c.turns[c.turns.length - 1].model });
+    const pushChats = () => {
+      state.chats = [...saved.values()].sort((a, b) => b.updated - a.updated).map(summary);
+      emit({ type: "chats", chats: state.chats, chat_id: state.chat_id });
+    };
+    let chatSeq = 1;
+    function saveChat() {
+      if (!state.turns.length) return;
+      if (!state.chat_id) state.chat_id = `${Date.now()}-${String(chatSeq++).padStart(4, "0")}`;
+      const old = saved.get(state.chat_id);
+      saved.set(state.chat_id, { id: state.chat_id, created: old ? old.created : nowS(), updated: nowS(), turns: state.turns.map((t) => ({ ...t, status: t.status === "streaming" ? "stopped" : t.status })) });
+      pushChats();
+    }
+    if (scenario === "chats") {
+      const t = (user, answer, model, extra = {}) => ({ id: 0, user, reasoning: "", answer, model, status: "done", thought_ms: null, system_prompt: "", temperature: 0.7, context: 2048, ...extra });
+      [
+        { id: "1700000000000-0001", created: nowS() - 3 * DAY, updated: nowS() - 3 * DAY, turns: [t("Explain the moon landing to a 6 year old in a few sentences.", "Okay, imagine the Earth is like a giant bouncy ball…", "Gemma 3 1B Instruct")] },
+        { id: "1700000000000-0002", created: nowS() - DAY, updated: nowS() - DAY + 600, turns: [t("What is 17 + 25?", "**42**", "Qwen3 0.6B"), t("And 42 + 58?", "**100**", "Qwen3 0.6B")] },
+        { id: "1700000000000-0003", created: nowS() - 3600, updated: nowS() - 1800, turns: [t("Hello! Who are you?", "Arr, I be a friendly pirate…", "Gemma 3 1B Instruct", { system_prompt: "You are a friendly pirate. Always start your answer with the word Arr.", temperature: 0.2 })] },
+      ].forEach((c) => saved.set(c.id, c));
+      state.chats = [...saved.values()].sort((a, b) => b.updated - a.updated).map(summary);
+    }
     let cancel = null;
     const snap = () => JSON.parse(JSON.stringify(state));
     const setEngine = (e) => {
@@ -109,7 +138,7 @@
         return Promise.reject(state.engine.state === "idle" ? err("no_model", "No model is loaded.", "Pick a model in the list on the left. If the list is empty, import a model file or download one.") : err("busy", "Trurl is still busy with the last request.", "Wait for it to finish, or press Stop."));
       }
       if (state.generating) return Promise.reject(err("busy", "Trurl is still busy with the last request.", "Wait for it to finish, or press Stop."));
-      const turn = { id: nextTurn++, user: text, reasoning: "", answer: "", model: state.engine.name, status: "streaming", thought_ms: null };
+      const turn = { id: nextTurn++, user: text, reasoning: "", answer: "", model: state.engine.name, status: "streaming", thought_ms: null, system_prompt: state.settings.system_prompt, temperature: state.settings.temperature, context: state.settings.context_size };
       state.turns.push(turn);
       state.generating = true;
       emit({ type: "generating", generating: true });
@@ -121,6 +150,7 @@
         cancel = null;
         emit({ type: "turn_finished", turn: { ...turn } });
         emit({ type: "generating", generating: false });
+        saveChat();
       };
       if (/LONG|ROOM/.test(text) || (state.settings.context_size <= 256 && text.length > 200)) {
         later(400, () => finish("error", err("context_full", "The conversation ran out of room.", "Start a new chat or increase the context size.")));
@@ -225,8 +255,40 @@
       },
       new_chat: () => {
         if (cancel) cancel();
+        saveChat();
         state.turns = [];
+        state.chat_id = null;
         emit({ type: "chat_cleared" });
+        pushChats();
+      },
+      open_chat: ({ id }) => {
+        const c = saved.get(id);
+        if (!c) return Promise.reject(err("chat_open", "This chat could not be opened.", "The file may be damaged. Your other chats are not affected."));
+        if (cancel) cancel();
+        saveChat();
+        state.turns = c.turns.map((t) => ({ ...t, id: nextTurn++ }));
+        state.chat_id = id;
+        const last = c.turns[c.turns.length - 1];
+        Object.assign(state.settings, { system_prompt: last.system_prompt || "", temperature: last.temperature ?? 0.7, context_size: last.context || 2048 });
+        emit({ type: "snapshot", snapshot: snap() });
+      },
+      delete_chat: ({ id }) => {
+        saved.delete(id);
+        if (state.chat_id === id) {
+          if (cancel) cancel();
+          state.turns = [];
+          state.chat_id = null;
+          emit({ type: "chat_cleared" });
+        }
+        pushChats();
+      },
+      delete_all_chats: () => {
+        if (cancel) cancel();
+        saved.clear();
+        state.turns = [];
+        state.chat_id = null;
+        emit({ type: "chat_cleared" });
+        pushChats();
       },
       set_system_prompt: ({ text }) => {
         state.settings.system_prompt = text;

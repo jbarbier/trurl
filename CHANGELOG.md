@@ -11,6 +11,9 @@ for learners and teachers: short, plain, what changes for them.
 - A download you start scrolls into view, so you see its progress bar.
 - Models no longer say "Included with Trurl" when you downloaded them: course models
   say "Course model", other checked files "Checked by Trurl".
+- Chats: every conversation is saved on your computer, and only there. Open an
+  old chat to carry on where you stopped, with the same settings. Delete one chat,
+  or all of them.
 
 ## 0.1.0
 

@@ -132,6 +132,8 @@
     generating: false,
     downloads: [],
     course_models: [], // [{ id, name, note, file, size, fit }], fixed per Trurl version
+    chats: [], // saved chats, newest first: [{ id, title, updated, turns, model }]
+    chat_id: null, // the chat on screen (null: a new chat, not saved yet)
     importing: null, // { file, done, total }
     verifying: null, // { file, done, total }
     update: null, // { info, phase: "offer"|"installing"|"failed", done, total, error, hidden }
@@ -775,10 +777,9 @@
     if (S.generating) {
       const ok = await confirmBox({
         title: "Start a new chat?",
-        text: "The model is still answering. The answer so far will be lost.",
+        text: "The model is still answering. The answer stops here and stays in your chats.",
         ok: "Start a new chat",
         keep: "Keep this answer",
-        danger: true,
       });
       if (!ok) return;
     }
@@ -1420,6 +1421,98 @@
     });
   }
 
+  // ---------- Chats: the history ------------------------------------------
+  // Saved by the core after every answer, on this computer only. Opening one
+  // brings back its questions, answers and settings, and the chat carries on.
+
+  function when(secs) {
+    const d = new Date(secs * 1000);
+    const now = new Date();
+    const time = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    if (d.toDateString() === now.toDateString()) return `Today, ${time}`;
+    const y = new Date(now);
+    y.setDate(now.getDate() - 1);
+    if (d.toDateString() === y.toDateString()) return `Yesterday, ${time}`;
+    return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" });
+  }
+
+  // Errors from this dialog are shown in it: the page's notices sit under it.
+  function chatsNote(e) {
+    put($("chatsNote"), e && h("div", { class: "inline-note take" }, h("p", { class: "t", text: e.title }), h("p", { class: "h", text: e.hint || "" })));
+  }
+  const chatTitle = (c) => c.title || "Untitled chat";
+
+  async function openChat(c) {
+    chatsNote(null);
+    if (S.generating) {
+      const go = await confirmBox({ title: "Stop the answer and open this chat?", text: "The answer being written stops here. It stays in its chat, so you can read it later.", ok: "Open the chat", keep: "Keep this answer" });
+      if (!go) return;
+    }
+    const ok = await api.call("open_chat", { id: c.id }).then(() => true, (e) => (chatsNote(e), false));
+    if (ok && $("chatsDlg").open) $("chatsDlg").close();
+    if (ok) announce(`Opened the chat: ${chatTitle(c)}`);
+  }
+
+  async function deleteChat(c) {
+    chatsNote(null);
+    const stops = c.id === S.chat_id && S.generating ? " The answer being written stops." : "";
+    const go = await confirmBox({ title: "Delete this chat?", text: `“${chatTitle(c)}” (${c.turns} question${c.turns === 1 ? "" : "s"}) is deleted from this computer. This cannot be undone.${stops}`, ok: "Delete", danger: true });
+    if (go) api.call("delete_chat", { id: c.id }).catch(chatsNote);
+  }
+
+  function renderChats() {
+    const list = $("chatList");
+    if (!list) return;
+    $("deleteAllChats").hidden = !S.chats.length;
+    keepFocus(list, () => {
+      if (!S.chats.length) {
+        list.replaceChildren(h("li", { class: "empty-note", text: "No saved chats yet. A chat is saved here after its first answer." }));
+        return;
+      }
+      list.replaceChildren(
+        ...S.chats.map((c) => {
+          const here = c.id === S.chat_id;
+          return h(
+            "li",
+            { class: "row chat-row" + (here ? " current" : ""), "data-chat": c.id },
+            h(
+              "div",
+              { class: "row-main" },
+              h("span", { class: "row-name", text: chatTitle(c) }),
+              h(
+                "span",
+                { class: "row-meta" },
+                h("span", { text: when(c.updated) }),
+                h("span", { text: `${c.turns} question${c.turns === 1 ? "" : "s"}` }),
+                c.model && h("span", { text: c.model }),
+                here && h("span", { class: "tag tag-held", text: "On screen" })
+              )
+            ),
+            h(
+              "div",
+              { class: "row-acts" },
+              !here && h("button", { class: "btn btn-secondary btn-small", type: "button", "data-key": "open:" + c.id, "aria-label": `Open the chat ${chatTitle(c)}`, onclick: () => openChat(c) }, "Open"),
+              h("button", { class: "btn btn-danger-quiet btn-small", type: "button", "data-key": "del:" + c.id, "aria-label": `Delete the chat ${chatTitle(c)}`, onclick: () => deleteChat(c) }, "Delete")
+            )
+          );
+        })
+      );
+    });
+  }
+
+  function openChats() {
+    chatsNote(null);
+    renderChats();
+    openDialog($("chatsDlg"));
+    const first = $("chatList").querySelector("button") || $("chatsDlg").querySelector("[data-close]");
+    first.focus();
+  }
+  $("openChats").addEventListener("click", openChats);
+  $("deleteAllChats").addEventListener("click", async () => {
+    const go = await confirmBox({ title: "Delete all chats?", text: `All ${S.chats.length} saved chat${S.chats.length === 1 ? "" : "s"} are deleted from this computer, and the chat on screen is cleared. This cannot be undone.`, ok: "Delete all chats", danger: true });
+    if (go) api.call("delete_all_chats").catch(chatsNote);
+  });
+
   // ---------- Models dialog ----------------------------------------------
 
   const tabs = { local: $("tabLocal"), hub: $("tabHub") };
@@ -1666,12 +1759,15 @@
       generating: !!s.generating,
       downloads: s.downloads || [],
       course_models: s.course_models || [],
+      chats: s.chats || [],
+      chat_id: s.chat_id || null,
     });
     applySettings();
     resetTranscript(s.turns || []);
     renderDownloads();
     renderLocal();
     renderStatus();
+    renderChats();
   }
 
   const handlers = {
@@ -1763,6 +1859,11 @@
     downloads(ev) {
       S.downloads = ev.downloads;
       renderDownloads();
+    },
+    chats(ev) {
+      S.chats = ev.chats;
+      S.chat_id = ev.chat_id || null;
+      renderChats();
     },
     notice: (ev) => notice(ev.error),
     update_available: (ev) => offerUpdate(ev.update),

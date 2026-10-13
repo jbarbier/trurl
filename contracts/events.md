@@ -17,6 +17,9 @@ All commands are asynchronous. A command that fails rejects with a `UserError`
 | `send` | `{ text }` | turn id (number) |
 | `stop` | | |
 | `new_chat` | | |
+| `open_chat` | `{ id }` | (the chat's turns and the settings of its last answer come back; a `snapshot` follows) |
+| `delete_chat` | `{ id }` | (deleting the chat on screen also clears it: `chat_cleared`) |
+| `delete_all_chats` | | (every saved chat, and the chat on screen) |
 | `set_system_prompt` | `{ text }` | |
 | `set_temperature` | `{ value }` (0.0 to 2.0, step 0.1) | |
 | `set_context` | `{ value }` (one of `settings.context_choices`) | |
@@ -55,6 +58,7 @@ Every event is a JSON object with a `type` field.
 | `turn_thought` | `id`, `ms` | The first answer token came after `ms` of thinking. Collapse the thinking block and label it "Thought for Ns". |
 | `turn_finished` | `turn` | Final state of the turn (`done`, `stopped`, `cut`, `error`). |
 | `chat_cleared` | | New chat. |
+| `chats` | `chats`, `chat_id` | The saved chats or the chat on screen changed (saved after an answer, deleted, opened, new chat). A chat that was only looked at is not saved again. |
 | `import_progress` | `file`, `done`, `total` | Copying a model in. |
 | `import_finished` | `file` or `error` | |
 | `verify_progress` | `file`, `done`, `total` | Checking a bundled model's SHA-256. |
@@ -82,10 +86,13 @@ Settings    { system_prompt, temperature, context_size, model?, has_hf_token,
               default_temperature, default_context, context_choices[] }
 Snapshot    { version, llama_build, models_dir, hardware{ total_ram, physical_cores, threads,
               cpu_name, variant }, settings, models[], engine, turns[], generating, downloads[],
-              course_models[] }
+              course_models[], chats[], chat_id? }
+              chat_id: the chat on screen in the history; null until its first answer is saved
               variant: "avx2"|"avx"|"ssse3"|"compat", the llama-server build for this processor
 CourseModel { id, name, note, file, size, fit, download_id }   the course models in course order, fixed
               per version. download_id: the id of its pinned download; match downloads on it, not on file
+ChatSummary { id, title, updated, turns, model }   newest first; updated: seconds since 1970;
+              title: the first question, one line, at most 60 characters
 RepoHit     { id, downloads, likes, gated, updated?, chat? }
               chat: false = this model does not chat (embeddings, speech, rerankers)
 RepoDetails { id, author?, revision, gated, license?, downloads, likes, updated?, base_model?,

@@ -244,6 +244,7 @@ fn every_screen_draws_at_80_by_24_without_panicking() {
         Screen::Settings,
         Screen::Models,
         Screen::Hub,
+        Screen::Chats,
         Screen::About,
         Screen::Token,
     ] {
@@ -299,7 +300,10 @@ fn ctrl_n_during_an_answer_asks_first() {
     ready(&mut ui);
     ui.confirm = Some(Confirm::NewChat);
     let s = flat(&screen(&ui, 100, 30));
-    assert!(s.contains("The answer so far will be lost."), "{s}");
+    assert!(
+        s.contains("The answer stops here and stays in your chats (F9)."),
+        "{s}"
+    );
 }
 
 #[test]
@@ -812,4 +816,152 @@ fn a_search_download_of_another_commit_is_not_the_course_download() {
         Some("download"),
         "Enter fetches the pinned file, never resumes the other one"
     );
+}
+
+// ----- Chat history --------------------------------------------------------------
+
+fn summary(id: &str, title: &str, ago_secs: u64, turns: usize) -> trurl_core::history::ChatSummary {
+    trurl_core::history::ChatSummary {
+        id: id.into(),
+        title: title.into(),
+        updated: trurl_core::history::now() - ago_secs,
+        turns,
+        model: "Gemma 3 1B Instruct".into(),
+    }
+}
+
+#[test]
+fn the_chats_screen_lists_saved_chats_newest_first_with_when_and_how_many() {
+    let mut ui = Ui::new();
+    ready(&mut ui);
+    ui.screen = Screen::Chats;
+    ui.chats = vec![
+        summary("2-1", "Hello! Who are you?", 120, 1),
+        summary(
+            "1-1",
+            "Explain the moon landing to a 6 year old in a few sentences, with a long tail of words",
+            3 * 86400,
+            3,
+        ),
+    ];
+    ui.chat_id = Some("2-1".into());
+    for (w, h) in [(80, 24), (120, 30)] {
+        let s = flat(&screen(&ui, w, h));
+        for want in [
+            "Chats",
+            "› Hello! Who are you?",
+            "2 min ago, 1 question",
+            "3 days ago, 3 questions",
+            "◆ on screen",
+            "Enter open",
+            "A delete all",
+        ] {
+            assert!(s.contains(want), "{w}x{h} missing {want:?}: {s}");
+        }
+        assert!(s.contains("Explain the moon landing"), "{s}");
+    }
+    ui.chats.clear();
+    let s = flat(&screen(&ui, 80, 24));
+    assert!(s.contains("No saved chats yet"), "{s}");
+    assert!(!s.contains("A delete all"), "{s}");
+}
+
+#[test]
+fn ago_needs_no_clock() {
+    use crate::view::ago;
+    assert_eq!(ago(1000, 1030), "just now");
+    assert_eq!(ago(1000, 1000 + 5 * 60), "5 min ago");
+    assert_eq!(ago(0, 7200), "2 h ago");
+    assert_eq!(ago(0, 90000), "1 day ago");
+    assert_eq!(ago(0, 86400 * 9), "9 days ago");
+    assert_eq!(
+        ago(2000, 1000),
+        "just now",
+        "a clock set back is not an error"
+    );
+}
+
+/// Against a real core with two saved chats: Enter opens one (its turns come
+/// back), D and A ask first and then delete.
+#[tokio::test]
+async fn chats_screen_keys_open_and_delete_against_the_core() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use trurl_core::chat::{Turn, TurnStatus};
+    use trurl_core::history::{Chat, History};
+    let home = tempfile::tempdir().unwrap();
+    let paths = trurl_core::paths::Paths::at(home.path());
+    paths.ensure().unwrap();
+    let t = |user: &str| Turn {
+        id: 1,
+        user: user.into(),
+        reasoning: String::new(),
+        answer: "ok".into(),
+        model: "Gemma 3 1B Instruct".into(),
+        status: TurnStatus::Done,
+        thought_ms: None,
+        error: None,
+        system_prompt: "Be brief.".into(),
+        temperature: 0.4,
+        context: 2048,
+    };
+    let h = History::new(paths.chats());
+    for (id, q, up) in [("1-1", "Old question", 10), ("2-1", "New question", 20)] {
+        h.save(&Chat {
+            id: id.into(),
+            created: up,
+            updated: up,
+            model_file: None,
+            turns: vec![t(q)],
+        })
+        .unwrap();
+    }
+    let core = trurl_core::app::App::start(
+        trurl_core::app::AppConfig {
+            paths: paths.clone(),
+            llama_root: None,
+            hf_base: "http://127.0.0.1:9".into(),
+            user_agent: "trurl-test".into(),
+        },
+        std::sync::Arc::new(|_| {}),
+    );
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut ui = Ui::new();
+    ui.apply_snapshot(core.snapshot());
+    assert_eq!(ui.chats.len(), 2);
+    let key = |c| KeyEvent::new(c, KeyModifiers::NONE);
+
+    crate::on_key(&mut ui, &core, &tx, key(KeyCode::F(9))).await;
+    assert_eq!(ui.screen, Screen::Chats);
+    crate::on_key(&mut ui, &core, &tx, key(KeyCode::Down)).await;
+    crate::on_key(&mut ui, &core, &tx, key(KeyCode::Enter)).await;
+    assert_eq!(ui.screen, Screen::Chat);
+    let turns = core.turns();
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].user, "Old question");
+    assert_eq!(core.snapshot().settings.system_prompt, "Be brief.");
+
+    // D asks, Esc cancels, D + Enter deletes.
+    ui.apply_snapshot(core.snapshot());
+    crate::on_key(&mut ui, &core, &tx, key(KeyCode::F(9))).await;
+    ui.chats_sel = 0;
+    crate::on_key(&mut ui, &core, &tx, key(KeyCode::Char('d'))).await;
+    assert!(matches!(ui.confirm, Some(Confirm::DeleteChat { .. })));
+    crate::on_key(&mut ui, &core, &tx, key(KeyCode::Esc)).await;
+    assert_eq!(core.chats().len(), 2);
+    crate::on_key(&mut ui, &core, &tx, key(KeyCode::Char('d'))).await;
+    crate::on_key(&mut ui, &core, &tx, key(KeyCode::Enter)).await;
+    assert_eq!(core.chats().len(), 1);
+    assert!(!paths.chats().join("2-1.json").exists());
+
+    // A asks, then deletes everything and clears the screen.
+    ui.apply_snapshot(core.snapshot());
+    crate::on_key(&mut ui, &core, &tx, key(KeyCode::Char('a'))).await;
+    assert!(matches!(
+        ui.confirm,
+        Some(Confirm::DeleteAllChats { count: 1 })
+    ));
+    crate::on_key(&mut ui, &core, &tx, key(KeyCode::Enter)).await;
+    assert!(core.chats().is_empty());
+    assert!(core.turns().is_empty());
+    core.shutdown().await;
 }

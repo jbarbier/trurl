@@ -10,11 +10,11 @@ use crate::errors::UserError;
 use crate::sse::{SseItem, SseParser, parse_error_body};
 use crate::think::{Piece, ThinkSplitter};
 use futures_util::StreamExt;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnStatus {
     Streaming,
@@ -25,7 +25,7 @@ pub enum TurnStatus {
     Error,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Turn {
     pub id: u64,
     pub user: String,
@@ -36,7 +36,7 @@ pub struct Turn {
     pub status: TurnStatus,
     /// Time from the first reasoning token to the first answer token.
     pub thought_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<UserError>,
     /// The settings this answer was written with, so a learner comparing two
     /// answers can see what changed between them.
