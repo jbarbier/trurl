@@ -186,7 +186,7 @@ mod tests {
         assert_eq!(classify(&proxy), NetFailure::Other);
         assert!(is_proxy_refusal(&proxy));
         let dropped = Wrap(
-            "error sending request for url (http://x/proxy-tunnel.gguf)",
+            "error sending request for url (https://huggingface.co/a/b/resolve/main/proxy-tunnel.gguf)",
             Some(Box::new(Wrap(
                 "connection closed before message completed",
                 None,

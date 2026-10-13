@@ -52,9 +52,19 @@ FORBIDDEN = {
 SYMBOL = re.compile(r"^[0-9a-fA-F]+ <(.+)>:\s*$")
 
 
+# C runtime routines that Microsoft's compiler expands inline with an AVX path
+# chosen at run time (`__isa_available`), seen in llama.cpp's objects.
+CRT_DISPATCHED = {"wmemcmp", "memcmp", "wmemchr", "memchr", "wcslen", "strlen", "memcpy", "memmove", "memset"}
+
+
 def is_std(symbol: str) -> bool:
-    """A function of the C++ standard library (MSVC-mangled or demangled)."""
-    return "@std@@" in symbol or symbol.startswith("std::") or symbol.startswith("__std_")
+    """A function of the C/C++ runtime library (MSVC-mangled or demangled)."""
+    return (
+        "@std@@" in symbol
+        or symbol.startswith("std::")
+        or symbol.startswith("__std_")
+        or symbol in CRT_DISPATCHED
+    )
 
 
 def scan(exe: Path, std_hits: Counter | None = None, other_hits: Counter | None = None) -> Counter:
@@ -108,10 +118,11 @@ def main() -> int:
                 continue
             c = Counter()
             per_file = {}
-            # Microsoft's C++ library (inlined from its headers into every file
-            # that uses it) has AVX versions of a few routines and picks them only
-            # after asking the CPU (`__isa_available`). They are listed, not
-            # failed: check_cpu_emulated.py runs the whole .exe on an old CPU.
+            # Microsoft's C and C++ runtime (inlined from its headers into every
+            # file that uses it) has AVX versions of a few routines and picks them
+            # only after asking the CPU (`__isa_available`). They are listed by
+            # name, not failed: check_cpu_emulated.py runs the whole .exe on an
+            # old CPU. llama.cpp's own code never gets this pass.
             std_hits: Counter = Counter()
             other_hits: Counter = Counter()
             for f in files:
@@ -132,7 +143,7 @@ def main() -> int:
         if object_mode and std_hits:
             names = sorted({sym for (sym, kind) in std_hits if kind in forbidden})
             if names:
-                print(f"note {variant}: C++ standard library code with run-time CPU checks: {', '.join(names[:6])}")
+                print(f"note {variant}: C/C++ runtime code with run-time CPU checks: {', '.join(names[:6])}")
         if found:
             bad += 1
             print(f"FAIL {variant}: uses {found}  ({summary})")

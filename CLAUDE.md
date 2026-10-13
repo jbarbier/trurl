@@ -59,6 +59,7 @@ The core is the contract. Front ends never talk to llama-server or the network d
 ## Gates
 
 ```
+bash scripts/gates.sh                      # all the fast gates below, stops at the first failure
 cargo fmt --all --check                    # formatting, as CI
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked                        # unit + integration (local HTTP servers, no models)
