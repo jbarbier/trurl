@@ -56,7 +56,7 @@ fn main() {
     if args.iter().any(|a| a == "--help" || a == "-h") {
         let cfg = AppConfig::from_env("terminal");
         println!(
-            "Trurl {} by Cyberiad Labs: run open-weight language models offline.\n\n\
+            "Trurl {} by Julien Barbier, for Cyberiad Labs: run open-weight language models offline.\n\n\
              Keys: Enter send, Alt+Enter new line, Esc stop, Ctrl+N new chat, Ctrl+T show thinking,\n\
              F2 models, F3 settings, F4 Hugging Face, F1 about, Ctrl+Q quit.\n\n\
              Models folder: {}\nllama-server builds: {}",

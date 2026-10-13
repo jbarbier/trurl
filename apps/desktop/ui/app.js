@@ -1566,7 +1566,7 @@
         "div",
         { class: "about-top" },
         h("img", { class: "logo", src: "img/trurl-logo.svg", alt: "Trurl" }),
-        h("div", null, h("p", { class: "ver" }, "Version ", h("span", { class: "num", text: S.version })), h("p", { class: "by" }, "by Cyberiad Labs", h("img", { src: "img/cyberiad-mark.svg", alt: "" })))
+        h("div", null, h("p", { class: "ver" }, "Version ", h("span", { class: "num", text: S.version })), h("p", { class: "by" }, "By Julien Barbier, for Cyberiad Labs", h("img", { src: "img/cyberiad-mark.svg", alt: "" })))
       ),
       h("p", { text: "Trurl lets you run language models on your own computer, without internet, and see how they work." }),
       h(

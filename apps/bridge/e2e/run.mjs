@@ -422,7 +422,7 @@ if (SUITE === "full") {
     await page.click("#openAbout");
     await page.locator(".licenses details").first().waitFor({ timeout: 10000 });
     const text = await page.locator("#aboutBody").innerText();
-    if (!/Gemma Terms of Use/.test(text) || !/Cyberiad Labs/.test(text)) throw new Error("about is missing licenses or attribution");
+    if (!/Gemma Terms of Use/.test(text) || !/By Julien Barbier, for Cyberiad Labs/.test(text)) throw new Error("about is missing licenses or attribution");
     await shot(page, "about");
     await closeDialogs();
   });
