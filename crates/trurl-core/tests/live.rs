@@ -174,6 +174,9 @@ async fn reasoning_is_separate_timed_and_never_sent_back() {
     // real behaviour (Trurl then says the conversation ran out of room), so this
     // eval has a pass threshold: one of three attempts must finish. Every attempt
     // must keep the reasoning out of the answer.
+    // Whether the sum is right is the model's arithmetic, not Trurl's: a finished
+    // attempt with a wrong number is retried, but is enough to check Trurl
+    // (CI failed on 2026-10-13 and 10-14 with Trurl working; Qwen answered 15).
     let mut t = None;
     for attempt in 0..3 {
         if attempt > 0 {
@@ -184,17 +187,25 @@ async fn reasoning_is_separate_timed_and_never_sent_back() {
         assert!(!turn.answer.contains("<think>") && !turn.answer.contains("</think>"));
         assert!(!turn.reasoning.trim().is_empty(), "Qwen3 should think");
         if turn.status == TurnStatus::Done {
-            t = Some(turn);
-            break;
+            let right = turn.answer.contains("42");
+            t = Some((turn, h.events.lock().unwrap().clone()));
+            if right {
+                break;
+            }
+            continue;
         }
         assert_eq!(turn.status, TurnStatus::Cut, "{turn:?}");
     }
-    let t = t.expect("Qwen3 did not finish thinking in 3 attempts");
-    assert!(t.answer.contains("42"), "answer: {}", t.answer);
+    let (t, ev) = t.expect("Qwen3 did not finish thinking in 3 attempts");
+    assert!(!t.answer.trim().is_empty(), "an answer after the thinking");
+    assert!(
+        !t.answer.contains(t.reasoning.trim()),
+        "the reasoning is not in the answer: {}",
+        t.answer
+    );
     assert!(!t.answer.contains("<think>") && !t.answer.contains("</think>"));
     assert!(t.thought_ms.is_some());
-    // The reasoning streamed live, before the answer.
-    let ev = h.events.lock().unwrap().clone();
+    // The reasoning streamed live, before the answer (events of that attempt).
     let first_r = ev
         .iter()
         .position(|e| {
