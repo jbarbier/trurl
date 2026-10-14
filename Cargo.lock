@@ -5067,7 +5067,7 @@ dependencies = [
 
 [[package]]
 name = "trurl-bridge"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "serde_json",
@@ -5079,7 +5079,7 @@ dependencies = [
 
 [[package]]
 name = "trurl-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -5105,7 +5105,7 @@ dependencies = [
 
 [[package]]
 name = "trurl-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde_json",
  "tauri",
@@ -5120,7 +5120,7 @@ dependencies = [
 
 [[package]]
 name = "trurl-tui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.23.1",
  "flate2",

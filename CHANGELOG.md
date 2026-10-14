@@ -3,19 +3,19 @@
 Each section is also the release notes the update prompt shows, so write it
 for learners and teachers: short, plain, what changes for them.
 
-## Unreleased
+## 0.1.1
 
-- The course models are one click away: the Hugging Face screen starts with
-  For the course (Gemma 3 1B, Gemma 3 1B PT, Qwen3 0.6B), each the exact file the
-  course uses. No searching, no look-alikes.
+- Chats: every conversation is saved on your computer, and only there. Open an old
+  chat to carry on where you stopped, with the same settings. Delete one chat, or
+  all of them.
+- The course models are one click away: the Hugging Face screen starts with For the
+  course (Gemma 3 1B, Gemma 3 1B PT, Qwen3 0.6B), the exact files the course uses.
+  No searching, no look-alikes.
 - A download you start scrolls into view, so you see its progress bar.
-- Models no longer say "Included with Trurl" when you downloaded them: course models
-  say "Course model", other checked files "Checked by Trurl".
-- Chats: every conversation is saved on your computer, and only there. Open an
-  old chat to carry on where you stopped, with the same settings. Delete one chat,
-  or all of them.
-- About has a new switch, **Check automatically**. Turn it off and Trurl contacts the
-  internet about updates only when you click **Check for updates**.
+- Models you downloaded no longer say "Included with Trurl": course models say
+  "Course model", other checked files "Checked by Trurl".
+- About has a new switch, Check automatically. Turn it off and Trurl looks for
+  updates only when you click Check for updates.
 
 ## 0.1.0
 
