@@ -3,6 +3,15 @@
 Each section is also the release notes the update prompt shows, so write it
 for learners and teachers: short, plain, what changes for them.
 
+## 0.1.2
+
+- New versions show up more reliably. If Trurl cannot reach GitHub when it looks
+  for an update, it tries again after 30 minutes instead of the next day.
+- About says when Trurl last looked for an update and what it found. If it could
+  not check, About says so, and Details shows the reason.
+- When a new version is out, About has an Update now button. You can also update
+  after clicking Later on the card above the chat.
+
 ## 0.1.1
 
 - Chats: every conversation is saved on your computer, and only there. Open an old

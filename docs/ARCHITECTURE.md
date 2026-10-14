@@ -325,7 +325,28 @@ runs only when the learner opens the Hugging Face tab.
 wall-clock time (`update::CheckSchedule`, shared by both apps: a laptop that slept
 through the 24 hours checks within 10 minutes of waking), and when the learner
 clicks "Check for updates" in About. Never while an answer is being written.
-Offline or failed checks are silent.
+A check that fails (offline, GitHub down, a timeout, a bad manifest) is tried again
+30 minutes later (`update::RETRY_AFTER`), not 24 hours later: one bad moment at start
+must not hide an update for a day. Failures in a row double the wait (1 h, 2 h, ...)
+up to 24 h, so a broken manifest never means a request every half hour.
+
+Offline or failed checks put nothing on screen. In the desktop app, About shows what
+the last automatic check did ("Last automatic check: Today, 14:02. You had the latest
+version.", or why it failed, with the technical reason under Details), so "I see no
+update" can be explained. The UI also reads that result (`update_status`) at start,
+every minute and when About opens: an update the app found is offered even if the
+page missed the `update_available` event.
+
+If a newer version is out and the app shows nothing, open About and read that line:
+- "Automatic checks are off.": the switch above it is unticked;
+- "No automatic check yet": Trurl started less than 15 s ago, the switch was turned
+  on less than 10 minutes ago, or an answer was being written each time the check
+  was due (it waits for the answer);
+- "Waiting for GitHub to answer": the request is still out (it times out after 20 s;
+  About re-reads it every 2 s while open);
+- "It found version X": About offers Update now (and the card appears);
+- a failure: Details gives the updater's own error message, and the line says the
+  clock time of the retry (the app looks every 10 minutes, so up to 10 minutes later).
 
 **"Later"** hides the offer until the next launch or the next 24-hour check.
 

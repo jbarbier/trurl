@@ -75,22 +75,29 @@ pub const FIRST_CHECK_AFTER: Duration = Duration::from_secs(15);
 /// How often the schedule looks at the clock. Short, so a laptop that slept
 /// through the 24 hours checks soon after it wakes up.
 pub const SCHEDULE_TICK: Duration = Duration::from_secs(10 * 60);
+/// A check that failed (no internet yet, GitHub down, a slow start) is tried
+/// again after this, not 24 hours later. Each further failure in a row doubles
+/// the wait, up to `CHECK_EVERY`: a broken manifest never means 48 requests a day.
+pub const RETRY_AFTER: Duration = Duration::from_secs(30 * 60);
 
 /// When to check for updates: once at start, then every 24 hours of wall-clock
 /// time (a timer would stop while the laptop sleeps). Both apps use this, so
 /// "Later" means the same everywhere: the offer comes back at the next start or
-/// the next 24-hour check, never sooner.
+/// the next 24-hour check, never sooner. A failed check is retried after
+/// `RETRY_AFTER` (then 1 h, 2 h, ... up to 24 h): one bad moment at start must
+/// not hide an update for a day.
 #[derive(Debug, Default, Clone)]
 pub struct CheckSchedule {
-    last: Option<std::time::SystemTime>,
+    last: Option<(std::time::SystemTime, Duration)>,
+    failures: u32,
 }
 
 impl CheckSchedule {
     pub fn due(&self, now: std::time::SystemTime) -> bool {
         match self.last {
             None => true,
-            Some(last) => match now.duration_since(last) {
-                Ok(d) => d >= CHECK_EVERY,
+            Some((last, wait)) => match now.duration_since(last) {
+                Ok(d) => d >= wait,
                 // The clock went back (a dead CMOS battery, a time zone fix): do
                 // not wait for it to catch up again.
                 Err(_) => true,
@@ -98,10 +105,59 @@ impl CheckSchedule {
         }
     }
 
-    /// A check ran (online or not: offline is skipped silently until the next one).
+    /// GitHub answered (with or without a newer version): next check in 24 hours.
     pub fn checked(&mut self, now: std::time::SystemTime) {
-        self.last = Some(now);
+        self.last = Some((now, CHECK_EVERY));
+        self.failures = 0;
     }
+
+    /// The check failed: try again after 30 min, then 1 h, 2 h, ... at most 24 h.
+    pub fn failed(&mut self, now: std::time::SystemTime) {
+        let wait = RETRY_AFTER
+            .saturating_mul(1 << self.failures.min(16))
+            .min(CHECK_EVERY);
+        self.failures = self.failures.saturating_add(1);
+        self.last = Some((now, wait));
+    }
+
+    /// How long until the next check after the last outcome (for About's line).
+    pub fn retry_wait(&self) -> Option<Duration> {
+        self.last.map(|(_, wait)| wait)
+    }
+
+    /// Record the outcome of a check that ran at `now`.
+    pub fn record<T, E>(&mut self, now: std::time::SystemTime, outcome: &Result<T, E>) {
+        match outcome {
+            Ok(_) => self.checked(now),
+            Err(_) => self.failed(now),
+        }
+    }
+}
+
+/// What the last automatic check did, for About (`update_status` in
+/// contracts/events.md). `outcome` is what the check returned: the update's
+/// info (`version`, `notes`, `date`) when one is newer, `null` when not.
+/// `retry_in` is the wait the schedule chose after it.
+pub fn check_status(
+    at: u64,
+    outcome: &Result<serde_json::Value, UserError>,
+    retry_in: Option<Duration>,
+) -> serde_json::Value {
+    let mut s = match outcome {
+        Ok(serde_json::Value::Null) => serde_json::json!({ "outcome": "latest" }),
+        Ok(info) => serde_json::json!({ "outcome": "newer", "update": info }),
+        Err(e) => serde_json::json!({ "outcome": "failed", "error": e }),
+    };
+    s["at"] = at.into();
+    if let Some(w) = retry_in {
+        s["retry_in_mins"] = (w.as_secs() / 60).into();
+    }
+    s
+}
+
+/// A check that started at `at` and has not returned yet.
+pub fn running_status(at: u64) -> serde_json::Value {
+    serde_json::json!({ "at": at, "outcome": "running" })
 }
 
 pub fn platform_key() -> &'static str {
@@ -257,6 +313,78 @@ mod tests {
         assert!(s.due(t0 - Duration::from_secs(3600)));
         s.checked(t0 + CHECK_EVERY);
         assert!(!s.due(t0 + CHECK_EVERY + SCHEDULE_TICK));
+    }
+
+    #[test]
+    fn a_failed_check_is_retried_after_30_minutes_not_24_hours() {
+        use std::time::{Duration, SystemTime};
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+        let mut s = CheckSchedule::default();
+        // The first check at start gets no answer (Wi-Fi not up yet, GitHub down).
+        s.record::<(), ()>(t0, &Err(()));
+        assert!(!s.due(t0 + SCHEDULE_TICK), "not hammering every tick");
+        assert!(!s.due(t0 + RETRY_AFTER - Duration::from_secs(1)));
+        assert!(s.due(t0 + RETRY_AFTER), "tried again after 30 minutes");
+        // The retry gets an answer: back to once a day.
+        let t1 = t0 + RETRY_AFTER;
+        s.record::<(), ()>(t1, &Ok(()));
+        assert!(!s.due(t1 + RETRY_AFTER));
+        assert!(!s.due(t1 + CHECK_EVERY - Duration::from_secs(1)));
+        assert!(s.due(t1 + CHECK_EVERY));
+        // A clock set backwards after a failure still checks.
+        s.failed(t1);
+        assert!(s.due(t1 - Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn failures_in_a_row_back_off_to_once_a_day() {
+        use std::time::{Duration, SystemTime};
+        let t = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+        let mut s = CheckSchedule::default();
+        let mins = |s: &CheckSchedule| s.retry_wait().unwrap().as_secs() / 60;
+        let mut seen = vec![];
+        for _ in 0..8 {
+            s.failed(t);
+            seen.push(mins(&s));
+        }
+        // A broken manifest costs a handful of requests, then one a day.
+        assert_eq!(seen, [30, 60, 120, 240, 480, 960, 1440, 1440]);
+        // One answer resets it: the next failure waits 30 minutes again.
+        s.checked(t);
+        assert_eq!(mins(&s), 1440);
+        s.failed(t);
+        assert_eq!(mins(&s), 30);
+        // Thousands of failures never overflow.
+        for _ in 0..5000 {
+            s.failed(t);
+        }
+        assert_eq!(mins(&s), 1440);
+    }
+
+    #[test]
+    fn about_gets_what_the_last_automatic_check_did() {
+        let newer = serde_json::json!({ "version": "0.1.2", "notes": "Faster.", "date": null });
+        let s = check_status(100, &Ok(newer.clone()), Some(CHECK_EVERY));
+        assert_eq!(s["outcome"], "newer");
+        assert_eq!(s["update"], newer, "the full update, so About can offer it");
+        assert_eq!(s["at"], 100);
+        assert_eq!(s["retry_in_mins"], 1440);
+
+        let s = check_status(100, &Ok(serde_json::Value::Null), Some(CHECK_EVERY));
+        assert_eq!(s["outcome"], "latest");
+        assert!(s.get("update").is_none());
+
+        let err = UserError::update_check_failed().with_detail("operation timed out");
+        let s = check_status(100, &Err(err), Some(RETRY_AFTER));
+        assert_eq!(s["outcome"], "failed");
+        assert_eq!(s["error"]["detail"], "operation timed out");
+        assert_eq!(s["error"]["title"], "Trurl could not check for updates.");
+        assert_eq!(s["retry_in_mins"], 30);
+
+        assert_eq!(
+            running_status(7),
+            serde_json::json!({ "at": 7, "outcome": "running" })
+        );
     }
 
     #[test]

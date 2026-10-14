@@ -5,6 +5,8 @@
 //   offline   Hugging Face unreachable
 //   failed    the model did not load (too big)
 //   update    an update is offered a few seconds after start
+//   autofail  the automatic update check got no answer (About says why)
+//   missedevent  the automatic check found an update but the page missed the event
 //   chat      a conversation already on screen, with reasoning
 //   oldcpu    a 2008 laptop (SSSE3 engine): Hugging Face recommends Q4_0 files
 //   coursestates  each course row state: damaged, failed download, a look-alike file
@@ -20,6 +22,8 @@
     const scenario = params.get("scenario") || "default";
     const later = (ms, fn) => setTimeout(fn, ms);
     const err = (code, title, hint) => ({ code, title, hint });
+    const UPDATE = { version: "0.2.0", notes: "Faster model loading.\nClearer error when a model is too big.", date: "2026-11-02" };
+    let autoStatus = null; // what the last automatic update check did (`update_status`)
 
     const models = [
       { file: "gemma-3-1b-it-Q4_K_M.gguf", name: "Gemma 3 1B Instruct", quant: "Q4_K_M", size: 806058240, fit: "green", bundled: true, course: true, verified: true, broken: false, has_chat_template: true, reasoning_hint: false, train_context: 32768 },
@@ -391,7 +395,13 @@
         { name: "llama.cpp (MIT)", text: "MIT License\n\nCopyright (c) 2023-2026 The ggml authors …" },
       ],
       open_models_folder: () => {},
-      update_check: () => new Promise((r) => later(700, () => r(scenario === "update" ? { version: "0.2.0", notes: "Faster model loading.\nClearer error when a model is too big.", date: "2026-11-02" } : null))),
+      // &checkfails: the manual check fails (GitHub unreachable), whatever is known.
+      update_check: () =>
+        new Promise((r, no) =>
+          later(700, () => (params.has("checkfails") ? no(err("update_check_failed", "Trurl could not check for updates.", "Connect to the internet and try again. Trurl works the same without updates.")) : r(scenario === "update" || scenario === "missedevent" ? UPDATE : null)))
+        ),
+      // The last automatic check, as the desktop app reports it.
+      update_status: () => autoStatus,
       update_install: () => {
         let d = 0;
         const total = 24e6;
@@ -418,7 +428,19 @@
       } else if (state.models.length && state.settings.model) {
         load(state.settings.model);
       }
-      if (scenario === "update") later(2500, () => emit({ type: "update_available", update: { version: "0.2.0", notes: "Faster model loading.\nClearer error when a model is too big.", date: "2026-11-02" } }));
+      // The automatic check, as the desktop app runs it: the result lands in
+      // `update_status`, and (unless the page missed it) as `update_available`.
+      if (scenario === "update" || scenario === "missedevent" || scenario === "autofail")
+        later(scenario === "update" ? 2500 : 300, () => {
+          const at = Math.floor(Date.now() / 1000);
+          if (scenario === "autofail") {
+            autoStatus = { at, outcome: "failed", retry_in_mins: 30, error: { code: "update_check_failed", title: "Trurl could not check for updates.", hint: "Connect to the internet and try again. Trurl works the same without updates.", detail: "error sending request for url (https://github.com/jbarbier/trurl/releases/latest/download/latest.json): operation timed out" } };
+            return;
+          }
+          autoStatus = { at, outcome: "newer", update: UPDATE, retry_in_mins: 1440 };
+          if (scenario === "update") emit({ type: "update_available", update: UPDATE });
+        });
+      else autoStatus = { at: Math.floor(Date.now() / 1000), outcome: "latest", retry_in_mins: 1440 };
     });
 
     return {

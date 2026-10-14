@@ -126,7 +126,7 @@ async fn command(
     let args = body.map(|b| b.0).unwrap_or(Value::Null);
     let result = match cmd.as_str() {
         // Desktop-only commands: the bridge has no updater and no file manager.
-        "update_check" => Ok(Value::Null),
+        "update_check" | "update_status" => Ok(Value::Null),
         "update_install" | "open_models_folder" => Ok(Value::Null),
         _ => trurl_core::api::dispatch(&ctx.app, &cmd, args).await,
     };

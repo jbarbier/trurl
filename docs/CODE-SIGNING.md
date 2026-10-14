@@ -53,7 +53,8 @@ then D or A). On a shared computer, delete them before you leave.
 Trurl connects to the internet only in these cases:
 
 - **Update check (on by default, can be turned off).** Once after it starts and then
-  once a day, Trurl downloads
+  once a day (a check that fails is tried again after 30 minutes, then 1 hour, 2 hours
+  and so on, never more often), Trurl downloads
   `https://github.com/jbarbier/trurl/releases/latest/download/latest.json` from GitHub
   to see if a newer version exists. The request carries nothing about you or what you do
   in Trurl; like any web request, it shows your IP address to GitHub. To turn it off:

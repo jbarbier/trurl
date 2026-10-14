@@ -97,7 +97,8 @@ async function openModels(tab = "local") {
   if (!(await page.locator("#modelsDlg[open]").count())) await page.click("#openModels");
   await page.click(tab === "hub" ? "#tabHub" : "#tabLocal");
 }
-const closeDialogs = () => page.evaluate(() => document.querySelectorAll("dialog[open]").forEach((d) => d.close()));
+const closeDialogsOn = (p) => p.evaluate(() => document.querySelectorAll("dialog[open]").forEach((d) => d.close()));
+const closeDialogs = () => closeDialogsOn(page);
 
 // Switch models the way a learner does: the dropdown on the sidebar card.
 async function useModel(name) {
@@ -290,6 +291,123 @@ if (SUITE === "full") {
         });
         if (!inView) throw new Error("the new download's progress bar is scrolled out of view");
         await shot(p, "download-revealed");
+      } finally {
+        await p.close();
+      }
+    });
+
+  if (!CDP)
+    await step("About: an available update installs from there, and says what the automatic check found (mock core)", async () => {
+      const ui = new URL("../../desktop/ui/index.html?mock&scenario=update", import.meta.url).href;
+      const p = await browser.newPage({ viewport: { width: W, height: H } });
+      try {
+        await p.clock.install(); // the answer below stays in progress until the clock moves
+        await p.goto(ui);
+        await p.clock.runFor(4000); // the model loads, the automatic check finds 0.2.0
+        await p.getByText("Update available: version 0.2.0").waitFor({ timeout: 5000 });
+        // The learner says Later, then asks a question.
+        await p.locator(".banner").getByRole("button", { name: "Later" }).click();
+        await p.fill("#input", "Where is Accra?");
+        await p.click("#send");
+        await p.clock.runFor(200);
+        await p.click("#openAbout");
+        const about = p.locator("#aboutBody");
+        await about.getByText("Version 0.2.0 is available.").waitFor({ timeout: 5000 });
+        await about.getByText(/Last automatic check: Today, \d\d:\d\d\. It found version 0\.2\.0\./).waitFor({ timeout: 5000 });
+        if (/\b(false|undefined|null)\b/.test(await about.innerText())) throw new Error("a JavaScript value leaked into About's text");
+        await shot(p, "about-update-available");
+        // During the answer: Update now says why it waits, and About stays open.
+        const now = about.getByRole("button", { name: "Update now" });
+        await now.click();
+        await about.getByText("You can update when the answer is finished.").waitFor({ timeout: 5000 });
+        if (!(await p.locator("#aboutDlg").evaluate((d) => d.open))) throw new Error("About closed while the answer was being written");
+        // The answer ends: About redraws, the reason goes, the keyboard stays on the button.
+        await now.focus();
+        await p.clock.runFor(60000);
+        await about.getByText("You can update when the answer is finished.").waitFor({ state: "detached", timeout: 5000 });
+        if ((await p.evaluate(() => document.activeElement && document.activeElement.dataset.key)) !== "about-upd-now") throw new Error("focus lost when About redrew");
+        // Now it installs, and the download shows although the card was put away with Later.
+        await now.click();
+        if (await p.locator("#aboutDlg").evaluate((d) => d.open)) throw new Error("About stayed open over the download");
+        await p.locator(".banner").getByText("Downloading the update.").waitFor({ timeout: 5000 });
+      } finally {
+        await p.close();
+      }
+    });
+
+  if (!CDP)
+    await step("About: a failed Check for updates keeps the update Trurl already knows (mock core)", async () => {
+      const ui = new URL("../../desktop/ui/index.html?mock&scenario=update&checkfails", import.meta.url).href;
+      const p = await browser.newPage({ viewport: { width: W, height: H } });
+      try {
+        await p.goto(ui);
+        await p.getByText("Update available: version 0.2.0").waitFor({ timeout: 10000 });
+        await p.click("#openAbout");
+        const about = p.locator("#aboutBody");
+        await about.getByRole("button", { name: "Check for updates" }).click();
+        await about.getByText("Trurl could not check for updates.").first().waitFor({ timeout: 5000 });
+        await about.getByText("Version 0.2.0 is available.").waitFor({ timeout: 5000 });
+        await about.getByRole("button", { name: "Update now" }).waitFor({ timeout: 5000 });
+      } finally {
+        await p.close();
+      }
+    });
+
+  if (!CDP)
+    await step("an update the page never heard about still shows: read from the app within a minute, or at once in About (mock core)", async () => {
+      // missedevent: the automatic check found 0.2.0 but the update_available event
+      // was lost. update: the event came (the usual case); the minute's read of the
+      // same result must not undo "Later".
+      for (const via of ["event", "poll", "about"]) {
+        const ui = new URL(`../../desktop/ui/index.html?mock&scenario=${via === "event" ? "update" : "missedevent"}`, import.meta.url).href;
+        const p = await browser.newPage({ viewport: { width: W, height: H } });
+        try {
+          await p.clock.install();
+          await p.goto(ui);
+          await p.clock.runFor(via === "event" ? 3000 : 1000); // the check has run
+          if (via !== "event" && (await p.getByText("Update available: version 0.2.0").count())) throw new Error("offered before anything read the result");
+          // "event": the update_available event already showed it.
+          if (via === "poll") await p.clock.runFor(60000);
+          else if (via === "about") {
+            await p.click("#openAbout");
+            await p.locator("#aboutBody").getByRole("button", { name: "Update now" }).waitFor({ timeout: 5000 });
+            await closeDialogsOn(p);
+          }
+          await p.getByText("Update available: version 0.2.0").waitFor({ timeout: 5000 });
+          // "Later" holds: the next read of the same result does not bring it back.
+          await p.locator(".banner").getByRole("button", { name: "Later" }).click();
+          await p.clock.runFor(120000);
+          if (await p.getByText("Update available: version 0.2.0").count()) throw new Error(`"Later" undone by the next read (${via})`);
+        } finally {
+          await p.close();
+        }
+      }
+    });
+
+  if (!CDP)
+    await step("About: a failed automatic check says so, with the reason under Details (mock core)", async () => {
+      const ui = new URL("../../desktop/ui/index.html?mock&scenario=autofail", import.meta.url).href;
+      const p = await browser.newPage({ viewport: { width: W, height: H } });
+      try {
+        await p.goto(ui);
+        // Polled from here: waitForFunction would take an async predicate's Promise as true.
+        for (let i = 0; (await p.evaluate(() => window.trurl.call("update_status")))?.outcome !== "failed"; i++) {
+          if (i > 50) throw new Error("the mock's automatic check never failed");
+          await p.waitForTimeout(100);
+        }
+        await p.click("#openAbout");
+        const about = p.locator("#aboutBody");
+        await about.getByText(/Last automatic check: Today, \d\d:\d\d\. Trurl could not check for updates\. It tries again after \d\d:\d\d( tomorrow)?\./).waitFor({ timeout: 5000 });
+        if (await about.getByText("operation timed out").isVisible()) throw new Error("the technical reason shows before Details is clicked");
+        await about.getByRole("button", { name: "Details" }).click();
+        await about.getByText(/operation timed out/).waitFor({ timeout: 2000 });
+        if (await about.getByRole("button", { name: "Update now" }).count()) throw new Error("Update now offered with no update known");
+        await shot(p, "about-check-failed");
+        // Turned off with About open: the line stops promising a retry at once.
+        await p.locator("#autoUpdate").uncheck();
+        await about.getByText("Automatic checks are off now.").waitFor({ timeout: 5000 });
+        if (/tries again/.test(await about.innerText())) throw new Error("About still promises a retry with automatic checks off");
+        if (!(await about.getByText(/operation timed out/).isVisible())) throw new Error("the redraw closed Details");
       } finally {
         await p.close();
       }
@@ -492,13 +610,21 @@ if (SUITE === "update") {
     await page.getByText(`Update available: version ${expect}`).waitFor({ state: "detached", timeout: 5000 });
     await page.click("#openAbout");
     await page.getByRole("button", { name: "Check for updates" }).click();
+    // About already shows the known update: wait for the check itself to answer.
+    await page.locator("#aboutBody").getByText("Checking").waitFor({ state: "detached", timeout: 60000 });
     await page.getByText(`Version ${expect} is available.`).waitFor({ timeout: 60000 });
     await closeDialogs();
     await page.getByText(`Update available: version ${expect}`).waitFor({ timeout: 5000 });
   });
-  await step("Update now downloads, installs and closes the app", async () => {
+  await step("About says the automatic check found it, and offers Update now", async () => {
+    await page.click("#openAbout");
+    const about = page.locator("#aboutBody");
+    await about.getByText(new RegExp(`Last automatic check: Today, \\d\\d:\\d\\d\\. It found version ${expect.replace(/\./g, "\\.")}\\.`)).waitFor({ timeout: 5000 });
+    await shot(page, "about-update-available");
+  });
+  await step("Update now in About downloads, installs and closes the app", async () => {
     const gone = new Promise((resolve) => browser.on("disconnected", resolve));
-    await page.getByRole("button", { name: "Update now" }).click();
+    await page.locator("#aboutBody").getByRole("button", { name: "Update now" }).click();
     await Promise.race([gone, new Promise((_, rej) => setTimeout(() => rej(new Error("the app did not close to install")), 180000))]);
   });
   log(failures ? `${failures} step(s) FAILED` : "all steps passed");
