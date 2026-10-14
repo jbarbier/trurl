@@ -538,12 +538,28 @@ async fn a_filter_page_never_erases_the_part_already_downloaded() {
 async fn retries_never_give_up_on_a_dropping_connection() {
     let s = setup(Mode::DropAfter(10_000, 1_000)).await;
     s.downloads.start(s.req.clone()).unwrap();
-    // 5 retry delays of 50 ms: well past them.
-    tokio::time::sleep(Duration::from_millis(1500)).await;
+    // Wait for well past the 5 retry delays of 50 ms: more than 8 attempts.
+    // Counted, not timed: a slow CI runner (Windows) makes fewer attempts per
+    // second, and a fixed sleep failed there with the code working.
+    let t0 = std::time::Instant::now();
+    while s.srv.requests.load(Ordering::SeqCst) <= 8 {
+        let l = s.downloads.list();
+        assert_ne!(
+            l[0].status,
+            DownloadStatus::Failed,
+            "gave up: {:?}",
+            l[0].error
+        );
+        assert!(
+            t0.elapsed() < Duration::from_secs(30),
+            "only {} attempts in 30 s",
+            s.srv.requests.load(Ordering::SeqCst)
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     let l = s.downloads.list();
     assert_eq!(l.len(), 1);
     assert_ne!(l[0].status, DownloadStatus::Failed, "{:?}", l[0].error);
-    assert!(s.srv.requests.load(Ordering::SeqCst) > 8);
 }
 
 /// After a power cut, the end of the part file may hold bytes that never reached
