@@ -37,7 +37,7 @@
       llama_build: "v0.6.0 (b11429)",
       models_dir: "C:\\Users\\Ama\\AppData\\Local\\CyberiadLabs\\Trurl\\models",
       hardware: { total_ram: 4 * GB, physical_cores: 2, threads: 2, cpu_name: scenario === "oldcpu" ? "Intel(R) Core(TM)2 Duo CPU T6600 @ 2.20GHz" : "Intel(R) Core(TM) i5-3320M CPU @ 2.60GHz", variant: scenario === "oldcpu" ? "ssse3" : "avx" },
-      settings: { system_prompt: "", temperature: 0.7, context_size: 2048, model: models[0].file, has_hf_token: false, default_temperature: 0.7, default_context: 2048, context_choices: [256, 512, 1024, 2048, 4096, 8192] },
+      settings: { system_prompt: "", temperature: 0.7, context_size: 2048, model: models[0].file, has_hf_token: false, auto_update_check: true, default_temperature: 0.7, default_context: 2048, context_choices: [256, 512, 1024, 2048, 4096, 8192] },
       models: scenario === "empty" ? [] : models.slice(),
       engine: { state: "idle" },
       turns: [],
@@ -378,6 +378,10 @@
       },
       set_hf_token: ({ token }) => {
         state.settings.has_hf_token = !!token.trim();
+        emit({ type: "settings", settings: snap().settings });
+      },
+      set_auto_update: ({ on }) => {
+        state.settings.auto_update_check = !!on;
         emit({ type: "settings", settings: snap().settings });
       },
       licenses: () => [

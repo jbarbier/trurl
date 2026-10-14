@@ -462,6 +462,22 @@ if (SUITE === "full") {
     await shot(page, "about");
     await closeDialogs();
   });
+
+  await step("automatic update check can be turned off, and stays off", async () => {
+    await page.click("#openAbout");
+    const box = page.locator("#autoUpdate");
+    if (!(await box.isChecked())) throw new Error("automatic update check should start on");
+    await box.uncheck();
+    await closeDialogs();
+    // The saved setting, read back from the core (polled: the save is asynchronous).
+    await page.waitForFunction(async () => (await window.trurl.call("snapshot")).settings.auto_update_check === false, null, { timeout: 5000, polling: 200 });
+    await page.click("#openAbout");
+    // Reopened, About reads the setting again (polled: the settings event may still be on its way).
+    await page.waitForFunction(() => document.querySelector("#autoUpdate") && !document.querySelector("#autoUpdate").checked, null, { timeout: 5000 });
+    await page.locator("#autoUpdate").check(); // back on, for the steps after this one
+    await page.waitForFunction(async () => (await window.trurl.call("snapshot")).settings.auto_update_check === true, null, { timeout: 5000, polling: 200 });
+    await closeDialogs();
+  });
 }
 
 if (SUITE === "update") {

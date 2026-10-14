@@ -25,6 +25,9 @@ pub struct Settings {
     pub hf_token: String,
     /// Highest llama-server build allowed, lowered after an illegal-instruction crash.
     pub max_variant: Option<crate::hardware::CpuVariant>,
+    /// Ask GitHub for a new version once after start and every 24 hours. Off: only
+    /// when the user asks. A settings file from before this field keeps it on.
+    pub auto_update_check: bool,
 }
 
 impl Default for Settings {
@@ -36,6 +39,7 @@ impl Default for Settings {
             model: None,
             hf_token: String::new(),
             max_variant: None,
+            auto_update_check: true,
         }
     }
 }
@@ -123,6 +127,21 @@ mod tests {
         Settings::default().save(&path).unwrap(); // a second save replaces it, still private
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn automatic_update_checks_are_on_unless_turned_off() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("settings.json");
+        // A file written by 0.1.0, before the setting existed.
+        std::fs::write(&p, r#"{"temperature": 0.5}"#).unwrap();
+        assert!(Settings::load(&p).auto_update_check);
+        let off = Settings {
+            auto_update_check: false,
+            ..Default::default()
+        };
+        off.save(&p).unwrap();
+        assert!(!Settings::load(&p).auto_update_check);
     }
 
     #[test]

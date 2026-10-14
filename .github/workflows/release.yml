@@ -10,12 +10,27 @@ name: Release
 # reviews it and clicks "Publish release" on GitHub. See docs/RELEASING.md.
 #
 # Supply chain: llama-server is rebuilt from the pinned source (no cache), and
-# the signing key exists only in the one step that signs, in a job that builds
-# no project code.
+# the updater signing key exists only in the one step that signs, in a job that
+# builds no project code.
+#
+# Windows code signing (so SmartScreen does not block the installers): SignPath
+# Foundation signs trurl.exe, then the two installers, from GitHub artifacts of
+# this run. Each request waits for a maintainer to approve it on signpath.io.
+# Off until the repository variable SIGNPATH_ORGANIZATION_ID is set; until then
+# the installers are unsigned, as before. Setup: docs/RELEASING.md.
+#
+# "Run workflow" on the Actions tab does a dry run of the same jobs on any
+# branch: no tag check, no release, and code signing only if asked.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      sign:
+        description: "Code-sign the Windows files with SignPath (needs approval on signpath.io)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -23,14 +38,20 @@ permissions:
 jobs:
   windows:
     runs-on: windows-2022
+    timeout-minutes: 360   # build ~35 min, plus up to 2 h for each SignPath approval
+    permissions:
+      contents: read
+      actions: read   # SignPath reads this run's artifacts to verify their origin
     defaults:
       run:
         shell: pwsh
     env:
       TRURL_TEST_MODELS: ${{ github.workspace }}/../trurl-models
+      SIGN: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' && (github.event_name == 'push' || inputs.sign) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Tag matches pins.json
+        if: github.event_name == 'push'
         run: |
           $v = (Get-Content pins.json | ConvertFrom-Json).app.version
           if ("${{ github.ref_name }}" -ne "v$v") { throw "tag ${{ github.ref_name }} != v$v" }
@@ -58,23 +79,94 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx --no -- tauri icon ../../branding/app-icon.svg -o src-tauri/icons
+      - name: Version
+        run: echo "V=$((Get-Content pins.json | ConvertFrom-Json).app.version)" >> $env:GITHUB_ENV
+      - name: trurl.exe, marked as installed by NSIS before anything signs it
+        working-directory: apps/desktop
+        run: |
+          npx --no -- tauri build --no-bundle -- --locked
+          python ../../scripts/patch_bundle_type.py ../../target/release/trurl.exe nsis
+          if ($LASTEXITCODE -ne 0) { throw "bundle type marker" }
+      - name: trurl.exe for signing
+        if: env.SIGN == 'true'
+        id: exe-unsigned
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trurl-exe-unsigned
+          path: target/release/trurl.exe
+          if-no-files-found: error
+          overwrite: true   # a re-run after an approval timeout uploads again
+      - name: Sign trurl.exe (SignPath; approve the request on signpath.io)
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: trurl
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: trurl-exe
+          github-artifact-id: ${{ steps.exe-unsigned.outputs.artifact-id }}
+          parameters: |
+            version: ${{ toJSON(env.V) }}
+          wait-for-completion-timeout-in-seconds: 7200   # 2 h to approve on signpath.io
+          output-artifact-directory: target/signed-exe
+      - name: The signed trurl.exe goes into the installers
+        if: env.SIGN == 'true'
+        run: |
+          $s = Get-AuthenticodeSignature target/signed-exe/trurl.exe
+          if ($s.Status -ne "Valid") { throw "signed trurl.exe: $($s.Status) $($s.StatusMessage)" }
+          Copy-Item target/signed-exe/trurl.exe target/release/trurl.exe -Force
       - name: Update installer (small; WebView2 fetched only if missing)
         working-directory: apps/desktop
         run: |
-          npx --no -- tauri build -- --locked
+          # --no-binary-patching: trurl.exe is already marked (and maybe signed).
+          npx --no -- tauri bundle --bundles nsis --no-binary-patching
           New-Item -ItemType Directory -Force ../../dist | Out-Null
-          $v = (Get-Content ../../pins.json | ConvertFrom-Json).app.version
-          Copy-Item "../../target/release/bundle/nsis/Trurl_${v}_x64-setup.exe" ../../dist/
+          Copy-Item "../../target/release/bundle/nsis/Trurl_${env:V}_x64-setup.exe" ../../dist/
       - name: USB installer (embeds the WebView2 offline installer)
         working-directory: apps/desktop
         run: |
-          npx --no -- tauri build --config src-tauri/tauri.usb.conf.json -- --locked
-          $v = (Get-Content ../../pins.json | ConvertFrom-Json).app.version
-          Copy-Item "../../target/release/bundle/nsis/Trurl_${v}_x64-setup.exe" "../../dist/Trurl_${v}_x64-offline-setup.exe"
+          npx --no -- tauri bundle --bundles nsis --no-binary-patching --config src-tauri/tauri.usb.conf.json
+          Copy-Item "../../target/release/bundle/nsis/Trurl_${env:V}_x64-setup.exe" "../../dist/Trurl_${env:V}_x64-offline-setup.exe"
+      - name: Installers for signing
+        if: env.SIGN == 'true'
+        id: installers-unsigned
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installers-unsigned
+          path: dist/*.exe
+          if-no-files-found: error
+          overwrite: true   # a re-run after an approval timeout uploads again
+      - name: Sign the installers (SignPath; approve the request on signpath.io)
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: trurl
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: installers
+          github-artifact-id: ${{ steps.installers-unsigned.outputs.artifact-id }}
+          parameters: |
+            version: ${{ toJSON(env.V) }}
+          wait-for-completion-timeout-in-seconds: 7200   # 2 h to approve on signpath.io
+          output-artifact-directory: target/signed-installers
+      - name: Signed installers replace the unsigned ones
+        if: env.SIGN == 'true'
+        run: |
+          foreach ($f in "Trurl_${env:V}_x64-setup.exe", "Trurl_${env:V}_x64-offline-setup.exe") {
+            $s = Get-AuthenticodeSignature "target/signed-installers/$f"
+            if ($s.Status -ne "Valid") { throw "$f`: $($s.Status) $($s.StatusMessage)" }
+            Write-Host "$f signed by $($s.SignerCertificate.Subject)"
+            Copy-Item "target/signed-installers/$f" "dist/$f" -Force
+          }
+      - name: Unsigned build
+        if: env.SIGN != 'true'
+        run: Write-Host "::warning::Windows installers are NOT code-signed (SignPath not set up or not requested). SmartScreen will warn. See docs/RELEASING.md."
       - name: Models for the smoke test
         run: python scripts/fetch_models.py --dest $env:TRURL_TEST_MODELS --only gemma-3-1b-it,qwen3-0.6b
       - name: Smoke-test the USB installer exactly as a teacher uses it
-        run: ./scripts/windows_smoke.ps1
+        run: ./scripts/windows_smoke.ps1 -Installer "dist/Trurl_${env:V}_x64-offline-setup.exe" -ExpectSigned:($env:SIGN -eq 'true')
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows
@@ -133,6 +225,7 @@ jobs:
 
   publish:
     needs: [windows, linux]
+    if: github.event_name == 'push'   # a dry run stops before the updater key and the release
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -169,10 +262,20 @@ jobs:
       - name: Manifest, checksums, draft release
         env:
           GH_TOKEN: ${{ github.token }}
+          # Same condition as the windows job's SIGN on a tag push (this job runs only then).
+          SIGNED: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
         run: |
           python3 scripts/release_notes.py "$V" > notes.md
           python3 scripts/make_manifest.py --version "$V" --notes-file notes.md \
             --windows "dist/Trurl_${V}_x64-setup.exe" \
             --linux "dist/trurl-${V}-linux-x64.tar.gz" --out dist/latest.json
           (cd dist && sha256sum *.exe *.tar.gz > SHA256SUMS.txt)
-          gh release create "v$V" --draft --title "Trurl $V" --notes-file notes.md dist/*
+          # The release page (not the in-app update card) also links the signing policy,
+          # and credits SignPath only when this release was actually signed.
+          cp notes.md release.md
+          if [ "$SIGNED" = true ]; then
+            printf '\n\n---\nFree code signing provided by SignPath.io, certificate by SignPath Foundation. [Code signing policy](https://github.com/jbarbier/trurl/blob/main/docs/CODE-SIGNING.md)\n' >> release.md
+          else
+            printf '\n\n---\nThe Windows installers of this release are not code-signed. [Code signing policy](https://github.com/jbarbier/trurl/blob/main/docs/CODE-SIGNING.md)\n' >> release.md
+          fi
+          gh release create "v$V" --draft --title "Trurl $V" --notes-file release.md dist/*

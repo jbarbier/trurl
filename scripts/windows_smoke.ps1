@@ -5,7 +5,15 @@
 #      model and answers a message (driven through the real WebView2 window);
 #   3. closing Trurl stops llama-server;
 #   4. uninstalling keeps the models.
+# Also: the installed trurl.exe tells the updater it came from the NSIS installer,
+# and with -ExpectSigned, the installer and trurl.exe carry valid code signatures.
 # Screenshots of the real window go to target/e2e/windows/.
+#   ./scripts/windows_smoke.ps1 [-Installer path\to\setup.exe] [-ExpectSigned]
+param(
+  # Default: the last installer `tauri bundle` wrote (CI builds the USB one last).
+  [string]$Installer = "",
+  [switch]$ExpectSigned
+)
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $root = Get-Location
@@ -26,7 +34,11 @@ function Shot($name) {
 Step "USB-style folder: installer + models/"
 # By exact name: target/ is cached between CI runs and may hold older installers.
 $version = (Get-Content pins.json | ConvertFrom-Json).app.version
-$setup = Get-Item "target/release/bundle/nsis/Trurl_${version}_x64-setup.exe"
+if (-not $Installer) { $Installer = "target/release/bundle/nsis/Trurl_${version}_x64-setup.exe" }
+$setup = Get-Item $Installer
+$sig = Get-AuthenticodeSignature $setup.FullName
+Write-Host "installer $($setup.Name): signature $($sig.Status) $($sig.SignerCertificate.Subject)"
+if ($ExpectSigned -and $sig.Status -ne "Valid") { throw "installer is not validly signed: $($sig.Status)" }
 $usb = Join-Path $env:RUNNER_TEMP "TrurlUSB"
 New-Item -ItemType Directory -Force (Join-Path $usb "models") | Out-Null
 Copy-Item $setup.FullName $usb
@@ -49,6 +61,13 @@ if (Get-ChildItem $data -Filter *.part) { throw "a .part file was left behind" }
 foreach ($v in "avx2", "avx", "ssse3", "compat") {
   if (-not (Test-Path (Join-Path $env:LOCALAPPDATA "Trurl\llama\$v\llama-server.exe"))) { throw "llama-server $v missing from install" }
 }
+# Tauri's updater picks the installer type from this marker (scripts/patch_bundle_type.py).
+$bytes = [System.IO.File]::ReadAllBytes($app)
+$text = [System.Text.Encoding]::ASCII.GetString($bytes)
+if (-not $text.Contains("__TAURI_BUNDLE_TYPE_VAR_NSS")) { throw "installed trurl.exe is not marked as installed by NSIS: updates would fail" }
+$appSig = Get-AuthenticodeSignature $app
+Write-Host "installed trurl.exe: marked NSIS, signature $($appSig.Status) $($appSig.SignerCertificate.Subject)"
+if ($ExpectSigned -and $appSig.Status -ne "Valid") { throw "installed trurl.exe is not validly signed: $($appSig.Status)" }
 $installed = (Get-ChildItem (Join-Path $env:LOCALAPPDATA "Trurl") -Recurse -File | Measure-Object -Sum Length).Sum
 Write-Host ("installed, models copied. Trurl on disk: {0:N1} MB" -f ($installed / 1MB))
 

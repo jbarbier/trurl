@@ -38,6 +38,7 @@ model gets exactly what the learner sees.
 - [Pinned versions](#pinned-versions)
 - [Build, test, release](#build-test-release)
 - [How it works](#how-it-works)
+- [Code signing policy](#code-signing-policy)
 - [Licenses](#licenses)
 
 ## Install
@@ -63,12 +64,12 @@ is in [GitHub Actions](https://github.com/jbarbier/trurl/actions/workflows/ci.ym
 open the latest run and download `windows-installer-and-screenshots`. This needs a
 GitHub account (free), and GitHub deletes these files after 90 days.
 
-Windows may say "Windows protected your PC" the first time: click **More info**,
-then **Run anyway**. The installer does not carry a Microsoft-recognised signature
-yet (updates are checked against Trurl's own key, which is a different thing). On a
-Windows 11 computer with **Smart App Control** on, an unsigned installer is blocked
-outright; [docs/USB-BUNDLE.md](docs/USB-BUNDLE.md#on-the-learners-computer) explains
-the choice.
+Signed releases show **SignPath Foundation** as the publisher when Windows asks
+(see the [code signing policy](docs/CODE-SIGNING.md)). Releases made before signing
+was set up are not signed: Windows then says "Windows protected your PC" the first
+time. Click **More info**, then **Run anyway**. On a Windows 11 computer with
+**Smart App Control** on, unsigned programs are blocked outright;
+[docs/USB-BUNDLE.md](docs/USB-BUNDLE.md#on-the-learners-computer) explains the choice.
 
 ![Trurl on Windows, with the network blocked: it loaded Gemma 3 1B and answers](docs/img/windows.png)
 
@@ -178,7 +179,9 @@ When online, Trurl checks for a new version once after it starts and then once a
 day. If there is one, a small card says "Update available: version X.Y.Z" with what
 changed, and **Update now** or **Later**. It never updates by itself and never
 interrupts an answer. Updates replace the app only: your models stay. **About**
-shows the version and has **Check for updates**.
+shows the version and has **Check for updates**. To stop the daily check, uncheck
+**Check automatically** there (terminal app: About, then **A**); Trurl then contacts
+GitHub only when you click **Check for updates**.
 
 ### Keyboard
 
@@ -380,6 +383,13 @@ Trurl is a small Rust program around [llama.cpp](https://github.com/ggml-org/lla
   terminal app share one core, so they behave the same.
 
 Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org). What is signed, who approves each
+signature, and what Trurl sends over the network (privacy):
+[docs/CODE-SIGNING.md](docs/CODE-SIGNING.md).
 
 ## Licenses
 

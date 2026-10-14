@@ -146,16 +146,18 @@ a little from the Q4_K_M file's, as between any two files of the same model.
 
 ## On the learner's computer
 
-**Windows 11 and Smart App Control.** Until Trurl's installer is code-signed (see
-[RELEASING.md](RELEASING.md)), two Windows protections react to it:
+**Windows 11 and Smart App Control.** Two Windows protections can react to Trurl:
 
-- **SmartScreen** shows "Windows protected your PC". Click **More info**, then
-  **Run anyway**. This is normal for a new, unsigned program.
-- **Smart App Control** (some new Windows 11 computers) blocks it with no way to run
-  it anyway. It can only be turned off in **Windows Security**, **App & browser
-  control**, **Smart App Control settings**, and Windows does not let you turn it
-  back on without reinstalling. Decide this with the computer's owner. Signing
-  the installer removes the problem for everyone.
+- **SmartScreen** shows "Windows protected your PC" for an installer that is not
+  code-signed (releases from before signing was set up, see
+  [CODE-SIGNING.md](CODE-SIGNING.md)). Click **More info**, then **Run anyway**.
+- **Smart App Control** (some new Windows 11 computers) blocks unsigned programs with
+  no way to run them anyway. Trurl's model engine, `llama-server.exe`, is not signed
+  even in signed releases ([why](RELEASING.md#what-signing-does-not-cover)), so on
+  these computers Trurl most likely cannot start a model. Smart App Control can only
+  be turned off in **Windows Security**, **App & browser control**, **Smart App
+  Control settings**, and Windows does not let you turn it back on without
+  reinstalling. Decide this with the computer's owner.
 
 ### Models on the computer
 

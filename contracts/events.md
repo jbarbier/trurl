@@ -34,6 +34,7 @@ All commands are asynchronous. A command that fails rejects with a `UserError`
 | `download_course_model` | `{ id }` (a `course_models` id) | download id. The core uses the pinned repo, commit, file, size and SHA-256; nothing comes from the UI |
 | `download_pause` / `download_resume` / `download_cancel` | `{ id }` | |
 | `set_hf_token` | `{ token }` | |
+| `set_auto_update` | `{ on }` | (off: no update check unless the user asks; saved as `settings.auto_update_check`) |
 | `licenses` | | `{ name, text }[]` |
 | `open_models_folder` | | |
 | `update_check` | | `UpdateInfo` or `null` |

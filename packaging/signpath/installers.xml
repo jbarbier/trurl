@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath artifact configuration "installers": the two Windows installers, which
+     already contain the signed trurl.exe. Uploaded together as one GitHub artifact
+     (a zip). Paste into SignPath: project "trurl" > Artifact configurations >
+     "installers". See docs/RELEASING.md. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="Trurl_${version}_x64-setup.exe" product-name="Trurl" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="Trurl_${version}_x64-offline-setup.exe" product-name="Trurl" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

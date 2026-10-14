@@ -141,7 +141,8 @@ async fn run() -> i32 {
         let mut schedule = trurl_core::update::CheckSchedule::default();
         loop {
             let now = std::time::SystemTime::now();
-            if schedule.due(now) && !up_core.is_generating() {
+            // Turned off in About: no contact with GitHub unless the user presses u.
+            if schedule.due(now) && up_core.auto_update_check() && !up_core.is_generating() {
                 if up_tx
                     .send(Msg::Update(selfupdate::check().await, false))
                     .is_err()
@@ -483,7 +484,7 @@ async fn on_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: Key
         Screen::Models => models_key(ui, core, tx, k),
         Screen::Hub => hub_key(ui, core, tx, k),
         Screen::Chats => chats_key(ui, core, k),
-        Screen::About => about_key(ui, tx, k),
+        Screen::About => about_key(ui, core, tx, k),
         Screen::Token => match k.code {
             KeyCode::Esc => ui.screen = Screen::Chat,
             KeyCode::Enter => {
@@ -1083,7 +1084,7 @@ fn hub_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: KeyEvent
     }
 }
 
-fn about_key(ui: &mut Ui, tx: &mpsc::UnboundedSender<Msg>, k: KeyEvent) {
+fn about_key(ui: &mut Ui, core: &App, tx: &mpsc::UnboundedSender<Msg>, k: KeyEvent) {
     let n = view::tui_licenses().len();
     if ui.license_open.is_some() {
         match k.code {
@@ -1111,6 +1112,10 @@ fn about_key(ui: &mut Ui, tx: &mpsc::UnboundedSender<Msg>, k: KeyEvent) {
         KeyCode::Enter => {
             ui.license_open = Some(ui.license_sel);
             ui.about_scroll = 0;
+        }
+        // The settings event that follows redraws the line in About.
+        KeyCode::Char('a') | KeyCode::Char('A') => {
+            core.set_auto_update_check(!core.auto_update_check())
         }
         KeyCode::Char('u') | KeyCode::Char('U') => {
             ui.update_msg = Some("Checking for updates…".into());

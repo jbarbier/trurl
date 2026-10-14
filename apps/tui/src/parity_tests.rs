@@ -238,6 +238,33 @@ fn about_names_the_maker_and_the_version() {
 }
 
 #[test]
+fn about_says_whether_trurl_checks_for_updates_on_its_own() {
+    let mut ui = Ui::new();
+    ui.screen = Screen::About;
+    let on = flat(&screen(&ui, 100, 40));
+    assert!(
+        on.contains("Automatic update check: on (asks GitHub once a day). Press A to turn it off."),
+        "{on}"
+    );
+    ui.settings = Some(trurl_core::events::PublicSettings {
+        system_prompt: String::new(),
+        temperature: 0.7,
+        context_size: 2048,
+        model: None,
+        has_hf_token: false,
+        auto_update_check: false,
+        default_temperature: 0.7,
+        default_context: 2048,
+        context_choices: vec![2048],
+    });
+    let off = flat(&screen(&ui, 100, 40));
+    assert!(
+        off.contains("Automatic update check: off (Trurl asks GitHub only when you press U)."),
+        "{off}"
+    );
+}
+
+#[test]
 fn every_screen_draws_at_80_by_24_without_panicking() {
     for scr in [
         Screen::Chat,

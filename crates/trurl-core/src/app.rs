@@ -238,6 +238,7 @@ impl App {
             context_size: s.context_size,
             model: s.model.clone(),
             has_hf_token: !s.hf_token.trim().is_empty(),
+            auto_update_check: s.auto_update_check,
             default_temperature: settings::DEFAULT_TEMPERATURE,
             default_context: settings::DEFAULT_CONTEXT,
             context_choices: settings::CONTEXT_CHOICES.to_vec(),
@@ -335,6 +336,20 @@ impl App {
         if changed && let Some(f) = file {
             self.load(f);
         }
+    }
+
+    /// Off: Trurl contacts GitHub about updates only when the user asks.
+    pub fn set_auto_update_check(&self, on: bool) {
+        let s = {
+            let mut st = self.inner.state.lock().unwrap();
+            st.settings.auto_update_check = on;
+            st.settings.clone()
+        };
+        self.save_settings(&s);
+    }
+
+    pub fn auto_update_check(&self) -> bool {
+        self.inner.state.lock().unwrap().settings.auto_update_check
     }
 
     pub fn set_hf_token(&self, token: &str) {

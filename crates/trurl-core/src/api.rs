@@ -45,6 +45,10 @@ struct Id {
     id: String,
 }
 #[derive(Deserialize)]
+struct On {
+    on: bool,
+}
+#[derive(Deserialize)]
 struct Token {
     token: String,
 }
@@ -139,6 +143,10 @@ pub async fn dispatch(app: &App, cmd: &str, args: Value) -> Result<Value, UserEr
         }
         "set_hf_token" => {
             app.set_hf_token(&arg::<Token>(&args)?.token);
+            ok()
+        }
+        "set_auto_update" => {
+            app.set_auto_update_check(arg::<On>(&args)?.on);
             ok()
         }
         "licenses" => Ok(json!(crate::licenses::all())),

@@ -38,6 +38,7 @@ pub struct PublicSettings {
     pub context_size: u32,
     pub model: Option<String>,
     pub has_hf_token: bool,
+    pub auto_update_check: bool,
     pub default_temperature: f32,
     pub default_context: u32,
     pub context_choices: Vec<u32>,

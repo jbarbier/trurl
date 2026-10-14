@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath artifact configuration "trurl-exe": the desktop app itself, signed
+     before it goes into the installers. The release uploads target/release/trurl.exe
+     as a GitHub artifact, so the root is a zip. Product name and version are
+     enforced, as SignPath Foundation requires. Paste into SignPath: project
+     "trurl" > Artifact configurations > "trurl-exe". See docs/RELEASING.md. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="trurl.exe" product-name="Trurl" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>
