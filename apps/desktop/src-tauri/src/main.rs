@@ -27,6 +27,18 @@ struct Desktop {
     /// now" again installs it without downloading it a second time.
     downloaded: Mutex<Option<(Update, Vec<u8>)>>,
     installing: Mutex<bool>,
+    /// What the last automatic check did, shown in About. A check that fails in
+    /// the background is otherwise invisible: "I see no update" cannot be told
+    /// apart from "Trurl never asked".
+    last_auto: Mutex<Value>,
+}
+
+/// Seconds since 1970, for the About line "Last automatic check".
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 #[tauri::command]
@@ -39,6 +51,7 @@ async fn call(
     let d = state.inner().clone();
     match cmd.as_str() {
         "update_check" => check_update(&app, &d, true).await,
+        "update_status" => Ok(d.last_auto.lock().unwrap().clone()),
         "update_install" => install_update(app, d).await.map(|_| Value::Null),
         "open_models_folder" => {
             open_folder(&d.core.models_dir());
@@ -200,6 +213,7 @@ fn main() {
                 pending: Mutex::new(None),
                 downloaded: Mutex::new(None),
                 installing: Mutex::new(false),
+                last_auto: Mutex::new(Value::Null),
             });
             app.manage(desktop.clone());
 
@@ -214,8 +228,10 @@ fn main() {
                 let _ = w.show();
             }
 
-            // Update checks: once after launch, then every 24 hours. Offline: silently nothing.
-            // Turned off in About: no contact with GitHub unless the user clicks Check.
+            // Update checks: once after launch, then every 24 hours; a check that gets
+            // no answer is tried again in 30 minutes. Offline: nothing on screen, the
+            // reason is in About. Turned off in About: no contact with GitHub unless
+            // the user clicks Check.
             let d = desktop.clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(update::FIRST_CHECK_AFTER).await;
@@ -228,8 +244,12 @@ fn main() {
                         && !d.core.is_generating()
                         && !*d.installing.lock().unwrap()
                     {
-                        let _ = check_update(&handle, &d, false).await;
-                        schedule.checked(now);
+                        // "running" first: a check that never returns shows as such in About.
+                        *d.last_auto.lock().unwrap() = update::running_status(unix_now());
+                        let outcome = check_update(&handle, &d, false).await;
+                        schedule.record(now, &outcome);
+                        *d.last_auto.lock().unwrap() =
+                            update::check_status(unix_now(), &outcome, schedule.retry_wait());
                     }
                     tokio::time::sleep(update::SCHEDULE_TICK).await;
                 }

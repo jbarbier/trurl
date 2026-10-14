@@ -309,7 +309,10 @@
     while (slots.notices.children.length > 3) slots.notices.firstChild.remove();
   }
 
+  let aboutOffer = null; // About's "Update now" line, redrawn with the card
+  let aboutLastCheck = null; // About's "Last automatic check" line, redrawn with the settings
   function renderUpdate() {
+    if (aboutOffer) aboutOffer();
     const u = S.update;
     if (!u || u.hidden) return slots.update.replaceChildren();
     keepFocus(slots.update, () => {
@@ -359,9 +362,24 @@
     renderUpdate();
   }
 
+  // The automatic check's result, read from the app (`update_status`) as well as
+  // heard as `update_available`: an event the page missed (it was still loading,
+  // or reloaded) must not leave an update known to the app and invisible here.
+  // Each check is offered once; "Later" still holds until the next one.
+  let autoSeenAt = 0;
+  function takeAutoResult(st) {
+    if (!st || st.outcome !== "newer" || !st.update || st.at === autoSeenAt) return;
+    autoSeenAt = st.at;
+    if (!S.update || S.update.info.version !== st.update.version) offerUpdate(st.update);
+  }
+  const pollAutoResult = () => api.call("update_status").then(takeAutoResult, () => null);
+  pollAutoResult();
+  setInterval(pollAutoResult, 60000);
+
   function installUpdate() {
     if (S.generating || S.update.phase === "installing") return;
-    Object.assign(S.update, { phase: "installing", done: 0, total: 0 });
+    // Shown even after "Later": started from About, the download must be on screen.
+    Object.assign(S.update, { phase: "installing", done: 0, total: 0, hidden: false });
     renderUpdate();
     api.call("update_install").catch((e) => {
       Object.assign(S.update, { phase: "failed", error: e });
@@ -1632,25 +1650,114 @@
   const VARIANT = { avx2: "AVX2", avx: "AVX", ssse3: "SSSE3", compat: "Compatible" };
   let licenses = null;
 
+  // The About line for the last automatic check (`update_status`, contracts/events.md).
+  // "14:32", or "14:32 tomorrow" (a retry is at most 24 hours away).
+  function clockAt(secs, now) {
+    const d = new Date(secs * 1000);
+    const t = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    return d.toDateString() === new Date(now * 1000).toDateString() ? t : `${t} tomorrow`;
+  }
+
+  // `now` in seconds. The retry time is a clock time, not "in 30 minutes": About
+  // may be read long after the check. The app looks at the clock every 10 minutes,
+  // so the retry comes at that time or up to 10 minutes after it.
+  // `ui.open` and `ui.toggle` keep Details open across redraws (a settings event).
+  function lastCheckLine(st, autoOn, now = Date.now() / 1000, ui = { open: false, toggle: () => {} }) {
+    if (!st) return [autoOn ? "No automatic check yet. It runs when no answer is being written, within minutes." : "Automatic checks are off."];
+    const at = `Last automatic check: ${when(st.at)}.`;
+    if (st.outcome === "running") return [`${at} Waiting for GitHub to answer.`];
+    if (st.outcome === "newer") return [`${at} It found version ${st.update && st.update.version}.`];
+    if (st.outcome === "latest") return [`${at} You had the latest version.`];
+    const e = st.error || {};
+    const next = st.at + (st.retry_in_mins || 0) * 60;
+    let again = "";
+    if (!autoOn) again = " Automatic checks are off now.";
+    else if (st.retry_in_mins) again = next > now ? ` It tries again after ${clockAt(next, now)}.` : " It tries again within 10 minutes.";
+    const out = [`${at} ${e.title || "Trurl could not check for updates."}${again}`];
+    if (e.detail) {
+      const detail = h("pre", { class: "detail", id: "lastCheckDetail", hidden: !ui.open, text: e.detail });
+      const btn = h("button", { class: "link-btn", type: "button", "data-key": "last-check-details", "aria-expanded": String(ui.open), "aria-controls": "lastCheckDetail" }, "Details");
+      btn.addEventListener("click", () => {
+        const open = detail.hidden;
+        detail.hidden = !open;
+        btn.setAttribute("aria-expanded", String(open));
+        ui.toggle(open);
+      });
+      out.push(" ", btn, detail);
+    }
+    return out;
+  }
+
   async function openAbout() {
     const body = $("aboutBody");
     const hw = S.hardware || {};
-    const result = h("p", { class: "check-result", "aria-live": "polite" });
+    // Two parts: what the Check button said (checking, latest, an error), and the
+    // update Trurl knows about. A failed check never hides a known update.
+    const checkMsg = h("p", { class: "check-result", "aria-live": "polite" });
+    const offer = h("p", { class: "check-result" });
+    // A version is known (found now, or by the automatic check): update from here,
+    // the download shows in the card above the chat once About closes. Redrawn by
+    // renderUpdate, so it follows the card (downloading, failed).
+    const offerHere = () =>
+      keepFocus(offer, () => {
+        const u = S.update;
+        if (!u) return offer.replaceChildren();
+        if (u.phase === "installing") return put(offer, [h("span", { text: "Downloading the update. Trurl restarts when it is done." })]);
+        const failed = u.phase === "failed";
+        const reason = h("span", { class: "banner-reason" });
+        put(offer, [
+          h("span", { text: failed ? `Version ${u.info.version} could not be installed. ${(u.error && u.error.title) || ""}`.trim() : `Version ${u.info.version} is available.` }),
+          h(
+            "button",
+            {
+              class: "btn btn-primary",
+              type: "button",
+              "data-key": "about-upd-now",
+              onclick: () => {
+                // Checked on click, not when About opened: the answer may have ended since.
+                if (S.generating) return (reason.textContent = "You can update when the answer is finished.");
+                $("aboutDlg").close();
+                installUpdate();
+              },
+            },
+            failed ? "Try again" : "Update now"
+          ),
+          reason,
+        ]);
+      });
+    aboutOffer = offerHere;
+    offerHere();
     const checkBtn = h("button", { class: "btn btn-secondary", type: "button" }, "Check for updates");
     checkBtn.addEventListener("click", async () => {
       checkBtn.disabled = true;
-      result.replaceChildren(spinner(), " Checking…");
+      checkMsg.replaceChildren(spinner(), " Checking…");
       try {
         const info = await api.call("update_check");
         if (info) {
-          result.textContent = `Version ${info.version} is available. See the card above the chat.`;
-          offerUpdate(info);
-        } else result.textContent = "You have the latest version.";
+          // Announced (aria-live); the offer under it says which version.
+          checkMsg.textContent = "A new version is out.";
+          offerUpdate(info); // redraws the card, and the offer under this through offerHere
+        } else checkMsg.textContent = "You have the latest version.";
       } catch (e) {
-        result.textContent = e.code === "offline" ? "Connect to the internet to check for updates." : `${e.title} ${e.hint || ""}`.trim();
+        checkMsg.textContent = e.code === "offline" ? "Connect to the internet to check for updates." : `${e.title} ${e.hint || ""}`.trim();
       }
       checkBtn.disabled = false;
     });
+    // What the automatic check did: "no update offered" must be explainable.
+    // Redrawn when the setting changes; re-read while a check is still running.
+    const lastAuto = h("p", { class: "muted last-check" });
+    let lastSt = null;
+    const detailUi = { open: false, toggle: (o) => (detailUi.open = o) };
+    const drawLast = () => keepFocus(lastAuto, () => put(lastAuto, lastCheckLine(lastSt, S.settings?.auto_update_check !== false, Date.now() / 1000, detailUi)));
+    const readLast = () =>
+      api.call("update_status").then((st) => {
+        lastSt = st;
+        drawLast();
+        takeAutoResult(st);
+        if (st && st.outcome === "running") setTimeout(() => $("aboutDlg").open && readLast(), 2000);
+      }, () => null);
+    aboutLastCheck = drawLast;
+    readLast();
     // Off: Trurl contacts GitHub about updates only when the button above is clicked.
     const auto = h("input", { type: "checkbox", id: "autoUpdate" });
     auto.checked = S.settings?.auto_update_check !== false;
@@ -1681,7 +1788,7 @@
           hw.cpu_name && h("span", { class: "muted", text: hw.cpu_name })
         ),
         row("Models folder", h("span", { class: "mono", text: S.models_dir }), h("button", { class: "btn btn-secondary", type: "button", "data-open-folder": "" }, "Open folder")),
-        row("Updates", checkBtn, result, autoLabel)
+        row("Updates", checkBtn, checkMsg, offer, autoLabel, lastAuto)
       ),
       h("h3", { class: "sub-h", text: "Licenses" }),
       licList
@@ -1807,6 +1914,7 @@
       renderLocal();
       const auto = $("autoUpdate"); // About, if open
       if (auto) auto.checked = S.settings.auto_update_check !== false;
+      if (aboutLastCheck) aboutLastCheck(); // its retry promise depends on the switch
     },
     generating(ev) {
       S.generating = ev.generating;

@@ -2,7 +2,7 @@
 
 Version 1. Source of truth: `crates/trurl-core/src/events.rs` (events),
 `crates/trurl-core/src/api.rs` (commands) and, for what only the desktop app has
-(`update_*` events, `update_check`, `update_install`, `open_models_folder`),
+(`update_*` events, `update_check`, `update_status`, `update_install`, `open_models_folder`),
 `apps/desktop/src-tauri/src/main.rs`. Both front ends (desktop UI over Tauri or the
 dev bridge, terminal app in-process) use exactly this.
 
@@ -38,6 +38,7 @@ All commands are asynchronous. A command that fails rejects with a `UserError`
 | `licenses` | | `{ name, text }[]` |
 | `open_models_folder` | | |
 | `update_check` | | `UpdateInfo` or `null` |
+| `update_status` | | the last automatic check, or `null` if none ran since start: `{ at` (seconds since 1970)`, outcome: "running" \| "newer" \| "latest" \| "failed", update?` (`UpdateInfo`, when newer)`, error?` (a `UserError`, when failed)`, retry_in_mins? }` (`trurl_core::update::check_status`). The UI reads it at start, every minute and in About, so an `update_available` it missed still gets offered |
 | `update_install` | | (the app restarts when done) |
 
 The UI also gets `pickModelFile()` from `api.js`, which opens the OS file picker

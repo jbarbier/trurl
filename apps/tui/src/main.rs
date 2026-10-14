@@ -133,7 +133,8 @@ async fn run() -> i32 {
         }
     });
 
-    // Update checks: once after start (the model loads first), then every 24 h.
+    // Update checks: once after start (the model loads first), then every 24 h;
+    // a check that gets no answer is tried again in 30 minutes.
     let up_tx = tx.clone();
     let up_core = core.clone();
     tokio::spawn(async move {
@@ -143,13 +144,12 @@ async fn run() -> i32 {
             let now = std::time::SystemTime::now();
             // Turned off in About: no contact with GitHub unless the user presses u.
             if schedule.due(now) && up_core.auto_update_check() && !up_core.is_generating() {
-                if up_tx
-                    .send(Msg::Update(selfupdate::check().await, false))
-                    .is_err()
-                {
+                let outcome = selfupdate::check().await;
+                // No answer (offline, GitHub down): try again in 30 minutes, not tomorrow.
+                schedule.record(now, &outcome);
+                if up_tx.send(Msg::Update(outcome, false)).is_err() {
                     break;
                 }
-                schedule.checked(now);
             }
             tokio::time::sleep(trurl_core::update::SCHEDULE_TICK).await;
         }
